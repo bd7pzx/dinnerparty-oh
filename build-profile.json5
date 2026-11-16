@@ -1,0 +1,56 @@
+{
+  app: {
+    signingConfigs: [
+      {
+        name: 'default',
+        type: 'HarmonyOS',
+        material: {
+          certpath: 'C:\\Users\\me\\.ohos\\config\\default_fanlian_4jcqgW3SDTeMM2rS8Dk3A8alVCK1BL8MAqv3zfIoBM=.cer',
+          keyAlias: 'debugKey',
+          keyPassword: '0000001af7cf35a470f9644c00432f11e149c00bc7974b1c934c22ad5c2f5aae49a90c1ee4ff635c8266',
+          profile: 'C:\\Users\\me\\.ohos\\config\\default_fanlian_4jcqgW3SDTeMM2rS8Dk3A8alVCK1BL8MAqv3zfIoBM=.p7b',
+          signAlg: 'SHA256withECDSA',
+          storeFile: 'C:\\Users\\me\\.ohos\\config\\default_fanlian_4jcqgW3SDTeMM2rS8Dk3A8alVCK1BL8MAqv3zfIoBM=.p12',
+          storePassword: '0000001af7cf35a470f9644c00432f11e149c00bc7974b1c934c22ad5c2f5aae49a90c1ee4ff635c8266',
+        },
+      },
+    ],
+    products: [
+      {
+        name: 'default',
+        signingConfig: 'default',
+        targetSdkVersion: '26.0.0',
+        compatibleSdkVersion: '6.0.0(20)',
+        runtimeOS: 'HarmonyOS',
+        buildOption: {
+          strictMode: {
+            caseSensitiveCheck: true,
+            useNormalizedOHMUrl: true,
+          },
+        },
+      },
+    ],
+    buildModeSet: [
+      {
+        name: 'debug',
+      },
+      {
+        name: 'release',
+      },
+    ],
+  },
+  modules: [
+    {
+      name: 'entry',
+      srcPath: './entry',
+      targets: [
+        {
+          name: 'default',
+          applyToProducts: [
+            'default',
+          ],
+        },
+      ],
+    },
+  ],
+}

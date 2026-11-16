@@ -1,0 +1,21 @@
+{
+  "color": [
+    { "name": "start_window_background", "value": "#FFF6F8" },
+    { "name": "bg", "value": "#FFF6F8" },
+    { "name": "surface", "value": "#FFFFFF" },
+    { "name": "surface_alt", "value": "#FDF1F5" },
+    { "name": "tint", "value": "#F9E4EB" },
+    { "name": "line", "value": "#F0C9D6" },
+    { "name": "ink", "value": "#4A2438" },
+    { "name": "ink_soft", "value": "#B84A2438" },
+    { "name": "ink_faint", "value": "#734A2438" },
+    { "name": "primary", "value": "#B5466E" },
+    { "name": "primary_deep", "value": "#8E3054" },
+    { "name": "on_primary", "value": "#FFFFFF" },
+    { "name": "success", "value": "#3F8F6B" },
+    { "name": "warn", "value": "#C9873A" },
+    { "name": "danger", "value": "#C0433F" },
+    { "name": "glass", "value": "#D1FFFFFF" },
+    { "name": "glass_border", "value": "#E6F0C9D6" }
+  ]
+}

@@ -1,0 +1,402 @@
+import { common, ConfigurationConstant } from '@kit.AbilityKit';
+import { curves, promptAction, window } from '@kit.ArkUI';
+import { hdsMaterial, HdsTabs, HdsTabsController, SystemMaterialParams } from '@kit.UIDesignKit';
+import { Theme } from '../common/Theme';
+import { Store } from '../common/Store';
+import { AuthService, MiscService } from '../service/Services';
+import { MapTab } from '../view/MapTab';
+import { JourneyTab } from '../view/JourneyTab';
+import { FavoritesTab } from '../view/FavoritesTab';
+import { CommunityTab } from '../view/CommunityTab';
+import { ProfileTab } from '../view/ProfileTab';
+import { NoticeBar, PrimaryButton } from '../view/Widgets';
+
+/** 悬浮导航栏高度（vp），与 barHeight 对应 */
+const BAR_HEIGHT: number = 60;
+/** 内容底部为悬浮栏预留的空间（含与栏的呼吸间距） */
+const CONTENT_BOTTOM: number = 92;
+
+@Entry
+@Component
+struct Index {
+  @State currentTab: number = 0;
+  @State booted: boolean = false;
+  @State consent: boolean = true;
+  @State noticeText: string = '';
+  @State showNotice: boolean = true;
+  @State dark: boolean = false;
+  /** 登录态：用于把第 5 个页签换成头像 + 用户名 */
+  @State loggedIn: boolean = false;
+  @State userId: string = '';
+  @State userName: string = '';
+  @State hasAvatar: boolean = false;
+  /** 沉浸光感材质等级：设备支持 IMMERSIVE 走 ADAPTIVE，否则降 SMOOTH */
+  @State materialLevel: hdsMaterial.MaterialLevel = hdsMaterial.MaterialLevel.ADAPTIVE;
+
+  /** 避让区（由 EntryAbility 写入） */
+  @StorageProp('safeTopVp') safeTop: number = 0;
+  @StorageProp('safeBottomVp') safeBottom: number = 0;
+
+  private tabsController: HdsTabsController = new HdsTabsController();
+
+  aboutToAppear(): void {
+    this.resolveMaterialLevel();
+    this.boot();
+  }
+
+  /** 按设备能力选择材质等级 */
+  private resolveMaterialLevel(): void {
+    try {
+      const types: Array<hdsMaterial.MaterialType> = hdsMaterial.getSystemMaterialTypes();
+      if (types.indexOf(hdsMaterial.MaterialType.IMMERSIVE) < 0) {
+        this.materialLevel = hdsMaterial.MaterialLevel.SMOOTH;
+      } else {
+        this.materialLevel = hdsMaterial.MaterialLevel.ADAPTIVE;
+      }
+    } catch (err) {
+      this.materialLevel = hdsMaterial.MaterialLevel.SMOOTH;
+    }
+  }
+
+  private materialParams(): SystemMaterialParams {
+    return {
+      materialType: hdsMaterial.MaterialType.ADAPTIVE,
+      materialLevel: this.materialLevel
+    };
+  }
+
+  private async boot(): Promise<void> {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    try {
+      await Store.init(ctx);
+    } catch (err) {
+      // 持久化不可用时仍可运行
+    }
+    this.consent = Store.consent;
+    this.dark = Store.dark;
+    this.booted = true;
+    this.applySystemBar();
+    this.applyColorMode();
+    if (Store.isLoggedIn()) {
+      const me = await AuthService.me();
+      if (me.ok && me.data !== null) {
+        this.loggedIn = true;
+        this.userId = me.data.user.id;
+        this.userName = me.data.user.username;
+        this.hasAvatar = me.data.user.has_avatar === true;
+        Store.nickname = me.data.user.username;
+      }
+    }
+    const r = await MiscService.notice();
+    if (r.ok && r.data !== null && r.data.notice !== null) {
+      this.noticeText = `${r.data.notice.title}：${r.data.notice.content}`;
+    }
+  }
+
+  /** 头像地址：与原项目一致，有自定义头像走带时间戳的原图，否则走默认图 */
+  private avatarUrl(): string {
+    const base = Store.baseUrl.replace(/\/+$/, '');
+    const tail = this.hasAvatar ? `?t=${Date.now()}` : '?fallback=default';
+    return `${base}/users/${this.userId}/avatar${tail}`;
+  }
+
+  /**
+   * 切换深浅色。颜色全部走 app.color 资源（base / dark 两套），
+   * 因此用系统级 setColorMode 触发资源重载与整棵 UI 重绘。
+   */
+  private switchTheme(): void {
+    const next = !this.dark;
+    this.dark = next;
+    Store.dark = next;
+    this.applySystemBar();
+    try {
+      const ctx = getContext(this) as common.UIAbilityContext;
+      ctx.getApplicationContext().setColorMode(
+        next ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK
+          : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT
+      );
+    } catch (err) {
+      promptAction.showToast({ message: '当前设备不支持切换主题', duration: 2000 });
+    }
+  }
+
+  /** 按已保存偏好应用颜色模式 */
+  private applyColorMode(): void {
+    try {
+      const ctx = getContext(this) as common.UIAbilityContext;
+      ctx.getApplicationContext().setColorMode(
+        this.dark ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK
+          : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT
+      );
+    } catch (err) {
+      // 不支持时保持默认
+    }
+  }
+
+  /** 系统栏保持透明（沉浸），只切换图标明暗 */
+  private async applySystemBar(): Promise<void> {
+    try {
+      const ctx = getContext(this) as common.UIAbilityContext;
+      const win = await window.getLastWindow(ctx);
+      const fg = this.dark ? '#F6E8ED' : '#4A2438';
+      win.setWindowSystemBarProperties({
+        statusBarColor: '#00000000',
+        navigationBarColor: '#00000000',
+        statusBarContentColor: fg,
+        navigationBarContentColor: fg
+      });
+    } catch (err) {
+      // 系统栏属性不可用时忽略
+    }
+  }
+
+  build() {
+    Column() {
+      if (!this.booted) {
+        this.splash()
+      } else if (!this.consent) {
+        this.consentGate()
+      } else {
+        this.shell()
+      }
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor($r('app.color.bg'))
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
+  splash() {
+    Column() {
+      Text('东方饭联地图')
+        .fontSize(Theme.F_XL)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.ink'))
+      Text('觅食 · 行程 · 口味')
+        .fontSize(Theme.F_SM)
+        .fontColor($r('app.color.ink_faint'))
+        .margin({ top: 8 })
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+  }
+
+  /** 隐私同意门 */
+  @Builder
+  consentGate() {
+    Column() {
+      Text('欢迎来到东方饭联')
+        .fontSize(Theme.F_XL)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.ink'))
+      Text('我们会在你同意后记录以下内容：\n· 你浏览与收藏的地点，用于计算口味画像\n· 到店打卡时的定位数据（仅用于 50 米 / 10 分钟规则判定）\n· 搜索与筛选行为，用于改进推荐\n\n这些数据不会用于广告，你可以随时关闭社区同步。')
+        .fontSize(Theme.F_BASE)
+        .fontColor($r('app.color.ink_soft'))
+        .lineHeight(23)
+        .margin({ top: Theme.S_LG })
+      Column() {
+        PrimaryButton({
+          label: '同意并继续',
+          onTap: () => {
+            Store.consent = true;
+            this.consent = true;
+          }
+        })
+      }
+      .width('100%')
+      .margin({ top: Theme.S_XL })
+
+      Text('游客模式：不登录也能浏览地点、饭局与公告，打卡与社区互动需登录')
+        .fontSize(Theme.F_CAP)
+        .fontColor($r('app.color.ink_faint'))
+        .margin({ top: Theme.S_MD })
+        .textAlign(TextAlign.Center)
+    }
+    .width('100%')
+    .height('100%')
+    .padding({ left: Theme.S_XL, right: Theme.S_XL })
+    .justifyContent(FlexAlign.Center)
+  }
+
+  @Builder
+  shell() {
+    Column() {
+      // 顶栏：让开状态栏
+      Row() {
+        Column() {
+          Text('东方饭联地图')
+            .fontSize(Theme.F_LG)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.ink'))
+          Text(Store.isLoggedIn()
+            ? `已登录 · ${Store.nickname.length > 0 ? Store.nickname : Store.username}`
+            : '游客模式 · 未登录')
+            .fontSize(Theme.F_CAP)
+            .fontColor($r('app.color.ink_faint'))
+            .margin({ top: 2 })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        Text(this.dark ? '☾' : '☀')
+          .fontSize(Theme.F_MD)
+          .fontColor($r('app.color.primary'))
+          .width(34)
+          .height(34)
+          .textAlign(TextAlign.Center)
+          .backgroundColor($r('app.color.tint'))
+          .borderRadius(17)
+          .onClick(() => {
+            this.switchTheme();
+          })
+      }
+      .width('100%')
+      .padding({
+        left: Theme.S_LG,
+        right: Theme.S_LG,
+        top: this.safeTop + Theme.S_SM,
+        bottom: Theme.S_SM
+      })
+
+      if (this.showNotice && this.noticeText.length > 0) {
+        Column() {
+          NoticeBar({
+            text: this.noticeText,
+            onClose: () => {
+              this.showNotice = false;
+            }
+          })
+        }
+        .padding({ left: Theme.S_LG, right: Theme.S_LG, bottom: Theme.S_SM })
+      }
+
+      // 悬浮导航 + 沉浸光感（HdsTabs barFloatingStyle + systemMaterialEffect）
+      HdsTabs({ controller: this.tabsController, index: this.currentTab }) {
+        TabContent() {
+          this.tabPage(0)
+        }
+        .tabBar(this.tabBarItem(0, '地', '地图'))
+
+        TabContent() {
+          this.tabPage(1)
+        }
+        .tabBar(this.tabBarItem(1, '行', '行程'))
+
+        TabContent() {
+          this.tabPage(2)
+        }
+        .tabBar(this.tabBarItem(2, '收', '收藏'))
+
+        TabContent() {
+          this.tabPage(3)
+        }
+        .tabBar(this.tabBarItem(3, '邻', '同好'))
+
+        TabContent() {
+          this.tabPage(4)
+        }
+        .tabBar(this.profileTabBar())
+      }
+      .barPosition(BarPosition.End)
+      .barMode(BarMode.Fixed)
+      .scrollable(false)
+      .animationDuration(240)
+      .barHeight(BAR_HEIGHT)
+      .barOverlap(true)
+      .barFloatingStyle({
+        barSideMargin: 16,
+        barBottomMargin: this.safeBottom + 12,
+        thermoCtrl: true,
+        barOpacity: 1,
+        systemMaterialEffect: this.materialParams()
+      })
+      .onChange((index: number) => {
+        this.currentTab = index;
+      })
+      .layoutWeight(1)
+      .width('100%')
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 页内容：底部为悬浮栏预留空间，避免被遮挡 */
+  @Builder
+  tabPage(idx: number) {
+    Column() {
+      if (idx === 0) {
+        MapTab()
+      } else if (idx === 1) {
+        JourneyTab()
+      } else if (idx === 2) {
+        FavoritesTab()
+      } else if (idx === 3) {
+        CommunityTab()
+      } else {
+        ProfileTab()
+      }
+    }
+    .width('100%')
+    .height('100%')
+    .padding({ bottom: CONTENT_BOTTOM + this.safeBottom })
+  }
+
+  /** 普通页签：选中放大上移 + 弹簧曲线（官方示例做法） */
+  @Builder
+  tabBarItem(idx: number, icon: string, label: string) {
+    Column() {
+      Text(icon)
+        .fontSize(16)
+        .fontWeight(this.currentTab === idx ? FontWeight.Bold : FontWeight.Normal)
+        .fontColor(this.currentTab === idx ? $r('app.color.primary') : $r('app.color.ink_faint'))
+      Text(label)
+        .fontSize(Theme.F_CAP)
+        .fontColor(this.currentTab === idx ? $r('app.color.primary') : $r('app.color.ink_faint'))
+        .margin({ top: 3 })
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .scale({ x: this.currentTab === idx ? 1.06 : 0.96, y: this.currentTab === idx ? 1.06 : 0.96 })
+    .translate({ y: this.currentTab === idx ? -2 : 0 })
+    .opacity(this.currentTab === idx ? 1 : 0.82)
+    .animation({ duration: 320, curve: curves.springMotion() })
+  }
+
+  /** 第 5 个页签：未登录显示「我 / 我的」，登录后显示服务端头像 + 用户名 */
+  @Builder
+  profileTabBar() {
+    Column() {
+      if (this.loggedIn && this.userId.length > 0) {
+        Image(this.avatarUrl())
+          .width(26)
+          .height(26)
+          .borderRadius(13)
+          .objectFit(ImageFit.Cover)
+          .border({ width: 1, color: $r('app.color.glass_border') })
+          .draggable(false)
+      } else {
+        Text('我')
+          .fontSize(16)
+          .fontWeight(this.currentTab === 4 ? FontWeight.Bold : FontWeight.Normal)
+          .fontColor(this.currentTab === 4 ? $r('app.color.primary') : $r('app.color.ink_faint'))
+      }
+      Text(this.loggedIn && this.userName.length > 0 ? this.userName : '我的')
+        .fontSize(Theme.F_CAP)
+        .fontColor(this.currentTab === 4 ? $r('app.color.primary') : $r('app.color.ink_faint'))
+        .margin({ top: 3 })
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .constraintSize({ maxWidth: 62 })
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .scale({ x: this.currentTab === 4 ? 1.06 : 0.96, y: this.currentTab === 4 ? 1.06 : 0.96 })
+    .translate({ y: this.currentTab === 4 ? -2 : 0 })
+    .opacity(this.currentTab === 4 ? 1 : 0.82)
+    .animation({ duration: 320, curve: curves.springMotion() })
+  }
+}
