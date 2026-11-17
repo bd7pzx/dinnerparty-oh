@@ -615,5 +615,27 @@ devecocli signature generate           # 生成调试签名
 - 复验：登录「冬瓜」后进入同好页，正常渲染 30 位近邻，日志无 `TypeError`。
 
 截图见 `.screens/`：`21-amap-live.png`（高德出图）、`22-after-pan.png`（拖动后重新加载）、`23-overlay.png`（浮层与分类）、`32-community-final.png`（同好页修复后）、`60-light-pill.png`（浅色悬浮药丸）、`70-dark-resource.png`（深色 + 夜间地图）、`71-light-resource.png`（切回浅色）、`64-fav-tab.png`（药丸滑到收藏页）。
+### 7.5 全屏地图与横竖屏自适应
 
+**地图铺满整屏**：Index.ets 的根容器从 Column 换成 Stack，HdsTabs 撑满 100%，
+顶栏（标题 / 登录态 / 主题切换）改为浮层，背景用 `linearGradient` 从 `bg` 渐隐到新增的 `bg_clear`
+（浅色 `#00FBF6F8` / 深色 `#00120C0F`），并设 `hitTestBehavior(Transparent)` 让点击穿透到地图。
+
+- `MapTab` 里去掉了地图的圆角、外边距与父容器 padding，地图直接 `width/height 100%`；
+- 搜索框与分类标签从原来的列布局提出来，做成顶部浮层（同样带渐变），
+  下移 `safeTop + TITLE_BAND(46)` 避开浮起来的标题；
+- 非地图页在 `tabPage` 里补 `padding.top = safeTop + 52` 让开顶栏。
+
+> **坑**：`MapTab` 外层 `Stack` 是 `Alignment.Bottom`，直接塞进去的浮层会被贴到底部。
+> 需要再套一层撑满 `100%` + `justifyContent(FlexAlign.Start)` 的容器把它顶上去。
+
+**横竖屏自适应**（`display.on('change')` → `isWide = width > height`）：
+
+| 形态 | 搜索结果卡片 | 单个信息卡 |
+|---|---|---|
+| 竖屏（手机 / 折叠屏折叠） | `Swiper`，一次一张 | 全宽 |
+| 横屏（平板 / 折叠屏展开） | `List(Axis.Horizontal)` 连续滑动，卡片宽 330vp，一屏 3~4 张 | 固定 460vp 居中 |
+
+浮层卡片额外留出 `barClearance = 60(导航高) + 12(距底) + 12(呼吸) + safeBottom` 的底部间距，
+避免被悬浮导航压住——之前只写了 `margin.bottom`，在 `Stack(Bottom)` 里不生效，改成外层容器 `padding.bottom`。
 
