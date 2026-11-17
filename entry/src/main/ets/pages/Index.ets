@@ -1,4 +1,5 @@
 import { common, ConfigurationConstant } from '@kit.AbilityKit';
+import { resourceManager } from '@kit.LocalizationKit';
 import { curves, promptAction, window } from '@kit.ArkUI';
 import { hdsMaterial, HdsTabs, HdsTabsController, SystemMaterialParams } from '@kit.UIDesignKit';
 import { Theme } from '../common/Theme';
@@ -101,33 +102,42 @@ struct Index {
   }
 
   /**
-   * 切换深浅色。颜色全部走 app.color 资源（base / dark 两套），
-   * 因此用系统级 setColorMode 触发资源重载与整棵 UI 重绘。
+   * 顶栏按钮：在「深色 / 浅色 / 跟随系统」之间循环。
+   * 颜色全部走 app.color 资源（base / dark 两套），用系统级 setColorMode 触发整树重绘。
    */
   private switchTheme(): void {
-    const next = !this.dark;
-    this.dark = next;
-    Store.dark = next;
-    this.applySystemBar();
-    try {
-      const ctx = getContext(this) as common.UIAbilityContext;
-      ctx.getApplicationContext().setColorMode(
-        next ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK
-          : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT
-      );
-    } catch (err) {
-      promptAction.showToast({ message: '当前设备不支持切换主题', duration: 2000 });
+    const mode = Store.themeMode;
+    if (mode === 'system') {
+      Store.themeMode = 'dark';
+    } else if (mode === 'dark') {
+      Store.themeMode = 'light';
+    } else {
+      Store.themeMode = 'system';
     }
+    this.applyColorMode();
+    this.applySystemBar();
   }
 
-  /** 按已保存偏好应用颜色模式 */
+  /** 按已保存偏好应用颜色模式（system 时交回系统决定） */
   private applyColorMode(): void {
+    const mode = Store.themeMode;
     try {
       const ctx = getContext(this) as common.UIAbilityContext;
-      ctx.getApplicationContext().setColorMode(
-        this.dark ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK
-          : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT
-      );
+      const app = ctx.getApplicationContext();
+      if (mode === 'system') {
+        app.setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET);
+        // 跟随系统时，用当前生效的资源配置判断深浅，供系统栏图标与地图样式使用
+        const isDark = ctx.resourceManager.getConfigurationSync().colorMode ===
+          resourceManager.ColorMode.DARK;
+        this.dark = isDark;
+        Store.dark = isDark;
+      } else {
+        const isDark = mode === 'dark';
+        this.dark = isDark;
+        Store.dark = isDark;
+        app.setColorMode(isDark ? ConfigurationConstant.ColorMode.COLOR_MODE_DARK
+          : ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT);
+      }
     } catch (err) {
       // 不支持时保持默认
     }

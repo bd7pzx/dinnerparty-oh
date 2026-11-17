@@ -20,6 +20,7 @@ export class Store {
     const username = Store.pref.getSync('username', '') as string;
     const nick = Store.pref.getSync('nickname', '') as string;
     const dark = Store.pref.getSync('dark', false) as boolean;
+    const themeMode = Store.pref.getSync('themeMode', 'system') as string;
     const baseUrl = Store.pref.getSync('baseUrl', '') as string;
     const consent = Store.pref.getSync('consent', false) as boolean;
 
@@ -28,9 +29,20 @@ export class Store {
     AppStorage.setOrCreate<string>('username', username);
     AppStorage.setOrCreate<string>('nickname', nick);
     AppStorage.setOrCreate<boolean>('dark', dark);
+    AppStorage.setOrCreate<string>('themeMode', themeMode);
     AppStorage.setOrCreate<string>('baseUrl', baseUrl.length > 0 ? baseUrl : DEFAULT_BASE);
     AppStorage.setOrCreate<boolean>('consent', consent);
     AppStorage.setOrCreate<number>('tabIndex', 0);
+  }
+
+  /** 主题模式：system 跟随系统 / light 浅色 / dark 深色 */
+  static get themeMode(): string {
+    return AppStorage.get<string>('themeMode') ?? 'system';
+  }
+
+  static set themeMode(v: string) {
+    AppStorage.setOrCreate<string>('themeMode', v);
+    Store.put('themeMode', v);
   }
 
   static get baseUrl(): string {

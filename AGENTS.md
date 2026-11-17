@@ -337,6 +337,22 @@ fy = 44                      // 最小点击区
 - **切换卡片不重新拉接口**：`moveToPlace()` 记录 `silentUntil = now + 1.6s`，
   `onRegion` 在该时间窗内只重算聚合、跳过 `loadRegion()`，保证滑动流畅。
 
+### 6.12 POI 本地缓存
+
+`common/PoiCache.ets`，preferences 存储（`poi_cache`）。
+
+- **只存 `id / name / category / lng / lat`**，其余字段（地址、图片、人均、评分）一律仍从线上拉；
+- 容量可配 **20–10000，默认 2000**；超出后按写入顺序淘汰最旧的，命中已有点会移到末尾（近似 LRU）；
+- 写入 800ms 防抖，避免每个视野都同步落盘；
+- **启动顺序**：先 `PoiCache.init()` → 若有缓存直接铺到地图（避免白屏）→ 再延迟 1.2s 拉线上覆盖；
+  没有缓存时才立即请求。这样缓存能覆盖时不会在启动瞬间打网络；
+- `MapTab.loadRegion()` 与 `search()` 成功后都会 `PoiCache.put()`。
+
+「我的」页新增**地点缓存**卡片：启用开关、上限数字输入（居中显示）+「应用」、当前已缓存数量、「清除」。
+开关与上限都即时持久化，上限调小会立刻裁剪已有缓存。
+
+> 顺带把地图右上角「高德地图 / 街区 / N 家」三个药丸的 `cardShadow()` 去掉了，只保留底色圆角。
+
 ---
 
 ## 七、沉浸式 · 悬浮导航 · 深色模式
@@ -411,7 +427,7 @@ this.materialLevel = types.indexOf(hdsMaterial.MaterialType.IMMERSIVE) < 0
 - 头像地址与逆向结论一致：`{backend}/users/{id}/avatar`，
   有自定义头像加 `?t=<ts>` 破缓存，否则 `?fallback=default`。
 
-### 7.4 深色模式（与地图同步）
+### 7.4 深色模式（与地图同步，支持跟随系统）
 
 颜色不在代码里硬编码，而是**全部走 `app.color` 资源**，`base/` 与 `dark/` 两套：
 
@@ -421,7 +437,8 @@ entry/src/main/resources/dark/element/color.json
 ```
 
 - 组件里统一用 `$r('app.color.xxx')`（共替换 177 处引用）；
-- 切换用系统级 `applicationContext.setColorMode(COLOR_MODE_DARK｜LIGHT)`，由系统重载资源配置，**整棵树即时重绘**，不是重启生效；
+- 三种模式并存（\Store.themeMode\）：\system\ 跟随系统（\COLOR_MODE_NOT_SET\）、\light\、\dark\；
+  - 切换用系统级 \pplicationContext.setColorMode(...)\，由系统重载资源配置，**整棵树即时重绘**，不是重启生效；
 - 启动时也按已保存偏好调用一次，避免重启后主题与开关不一致；
 - 系统栏图标随主题切换明暗，保持可读；
 - **地图同步**：`AmapView` 用 `@StorageProp('dark') @Watch` 监听，切换时 `setMapType(MAP_TYPE_NIGHT / MAP_TYPE_NORMAL)`，UI 与底图风格一致。
@@ -500,4 +517,5 @@ devecocli signature generate           # 生成调试签名
 - 复验：登录「冬瓜」后进入同好页，正常渲染 30 位近邻，日志无 `TypeError`。
 
 截图见 `.screens/`：`21-amap-live.png`（高德出图）、`22-after-pan.png`（拖动后重新加载）、`23-overlay.png`（浮层与分类）、`32-community-final.png`（同好页修复后）、`60-light-pill.png`（浅色悬浮药丸）、`70-dark-resource.png`（深色 + 夜间地图）、`71-light-resource.png`（切回浅色）、`64-fav-tab.png`（药丸滑到收藏页）。
+
 

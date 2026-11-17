@@ -8,6 +8,8 @@ import { MapCanvas } from './MapCanvas';
 import { AmapView } from './AmapView';
 import { PlaceDetail } from './PlaceDetail';
 import { getFix } from '../common/Location';
+import { PoiCache } from '../common/PoiCache';
+import { common } from '@kit.AbilityKit';
 import { EmptyState, LoadingRow, PillTag, PrimaryButton, SectionCard } from './Widgets';
 
 @Component
@@ -66,6 +68,16 @@ export struct MapTab {
 
   /** 先定位再按视野拉数据；无权限时用默认中心，并如实提示 */
   private async boot(): Promise<void> {
+    // 缓存优先：先把上次访问过的点直接铺出来，避免白屏
+    const ctx = getContext(this) as common.UIAbilityContext;
+    await PoiCache.init(ctx);
+    let fromCache = false;
+    if (PoiCache.isEnabled() && PoiCache.count() > 0) {
+      this.places = PoiCache.toPlaces();
+      this.refreshCluster();
+      fromCache = true;
+    }
+
     this.locating = true;
     const fix = await getFix();
     this.locating = false;
@@ -79,11 +91,22 @@ export struct MapTab {
     } else {
       this.tip = fix.message;
     }
-    // 首屏：以中心点构造约 2km 视野，loadRegion 内部再按 3×3 预取
-    await this.loadRegion(
-      this.centerLng - 0.010, this.centerLat - 0.008,
-      this.centerLng + 0.010, this.centerLat + 0.008
-    );
+
+    // 有缓存就先让缓存显示，稍后再拉线上，避免启动瞬间打请求
+    if (fromCache) {
+      setTimeout(() => {
+        this.loadRegion(
+          this.centerLng - 0.010, this.centerLat - 0.008,
+          this.centerLng + 0.010, this.centerLat + 0.008
+        );
+      }, 1200);
+    } else {
+      // 首屏：以中心点构造约 2km 视野，loadRegion 内部再按 3×3 预取
+      await this.loadRegion(
+        this.centerLng - 0.010, this.centerLat - 0.008,
+        this.centerLng + 0.010, this.centerLat + 0.008
+      );
+    }
     const c = await PlaceService.categories();
     if (c.ok && c.data !== null) {
       this.categories = c.data;
@@ -112,6 +135,8 @@ export struct MapTab {
     this.loading = false;
     if (r.ok && r.data !== null) {
       this.places = r.data;
+      // 只缓存 id / 名称 / 分类 / 坐标，其它字段仍走线上
+      PoiCache.put(r.data);
       this.refreshCluster();
       if (this.tip.length === 0) {
         this.tip = r.data.length === 0 ? '这一带还没有人标注过店铺，拖到别处看看' : '';
@@ -162,6 +187,7 @@ export struct MapTab {
     this.loading = false;
     if (r.ok && r.data !== null) {
       this.places = r.data;
+      PoiCache.put(r.data);
       this.refreshCluster();
       this.tip = r.data.length === 0 ? `没有找到与「${this.keyword}」相关的地点` : '';
       // 搜索结果：按离用户（未定位时用当前地图中心）的距离从近到远
@@ -613,7 +639,6 @@ export struct MapTab {
               .borderRadius(Theme.R_FULL)
           }
           .margin(Theme.S_SM)
-          .shadow(Theme.cardShadow())
 
           // ---- 地图内浮层：状态提示（左上） ----
           Column({ space: 6 }) {
