@@ -133,10 +133,28 @@ export class Supercluster {
     return out;
   }
 
-  /** 单层聚类（等价 supercluster._cluster） */
+  /**
+   * 单层聚类（等价 supercluster._cluster），邻域查询改用网格哈希。
+   * 原库用 KDBush 做空间索引；这里之前退化成线性扫描（O(n²)），
+   * 上千点会卡住主线程。改成按 r 分桶 + 3×3 邻域，复杂度降到 O(n·k)。
+   */
   private clusterLevel(data: number[], zoom: number): number[] {
     const r = this.radius / (this.extent * Math.pow(2, zoom));
     const next: number[] = [];
+    const rr = r * r;
+
+    // 网格索引：cell 边长 = r，查 3×3 邻域即可覆盖半径 r
+    const grid = new Map<string, number[]>();
+    for (let i = 0; i < data.length; i += STRIDE) {
+      const key = `${Math.floor(data[i] / r)}_${Math.floor(data[i + 1] / r)}`;
+      const arr = grid.get(key);
+      if (arr === undefined) {
+        grid.set(key, [i]);
+      } else {
+        arr.push(i);
+      }
+    }
+
     for (let i = 0; i < data.length; i += STRIDE) {
       if (data[i + O_ZOOM] <= zoom) {
         continue;
@@ -144,7 +162,26 @@ export class Supercluster {
       data[i + O_ZOOM] = zoom;
       const x = data[i];
       const y = data[i + 1];
-      const neighbors = this.within(data, x, y, r);
+
+      const neighbors: number[] = [];
+      const cx = Math.floor(x / r);
+      const cy = Math.floor(y / r);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const arr = grid.get(`${cx + dx}_${cy + dy}`);
+          if (arr === undefined) {
+            continue;
+          }
+          for (const idx of arr) {
+            const ddx = data[idx] - x;
+            const ddy = data[idx + 1] - y;
+            if (ddx * ddx + ddy * ddy <= rr) {
+              neighbors.push(Math.floor(idx / STRIDE));
+            }
+          }
+        }
+      }
+
       const numOrigin = data[i + O_NUM];
       let num = numOrigin;
       for (const nid of neighbors) {

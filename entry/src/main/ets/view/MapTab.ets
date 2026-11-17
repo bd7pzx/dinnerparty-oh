@@ -327,6 +327,33 @@ export struct MapTab {  @State places: Place[] = [];
       this.tip = '';
       return;
     }
+    // 缩到省/国尺度时 bbox 太大：请求会拖回海量数据把主线程压死。
+    // 这个尺度只用本地缓存 + 近期点位渲染，放大到城市级后再按需拉取。
+    if ((maxLng - minLng) > 2.5 || (maxLat - minLat) > 2.5) {
+      const local: Place[] = [];
+      const seenIds = new Set<number>();
+      const nowTs = Date.now();
+      this.recent.forEach((it: RecentPoi) => {
+        if (nowTs - it.ts <= this.RECENT_TTL) {
+          local.push(it.place);
+          seenIds.add(it.place.id);
+        }
+      });
+      if (PoiCache.isEnabled()) {
+        for (const p of PoiCache.toPlaces()) {
+          if (!seenIds.has(p.id)) {
+            local.push(p);
+            seenIds.add(p.id);
+          }
+        }
+      }
+      if (local.length > 0) {
+        this.places = local;
+        this.refreshCluster();
+        this.tip = '省/国尺度显示本地缓存的点位，放大地图可加载更多';
+      }
+      return;
+    }
     this.loading = true;
     const cx = (minLng + maxLng) / 2;
     const cy = (minLat + maxLat) / 2;
@@ -390,8 +417,9 @@ export struct MapTab {  @State places: Place[] = [];
    */
   private refreshCluster(): void {
     const b = this.lastBounds;
-    const padLng = Math.max((b[2] - b[0]) * 0.6, 0.01);
-    const padLat = Math.max((b[3] - b[1]) * 0.6, 0.01);
+    // 缓冲放宽到 2 倍视野：大尺度下也能覆盖屏幕外的相邻区域，不会出现点位缺失
+    const padLng = Math.max((b[2] - b[0]) * 2.0, 0.02);
+    const padLat = Math.max((b[3] - b[1]) * 2.0, 0.02);
     const minLng = b[0] - padLng;
     const maxLng = b[2] + padLng;
     const minLat = b[1] - padLat;
