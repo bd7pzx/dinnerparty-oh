@@ -15,6 +15,12 @@ export struct MapTab {
   @State places: Place[] = [];
   @State categories: Category[] = [];
   @State activeCategory: string = '';
+  /** 分类筛选模式：0 无 / 1 只看 / 2 排除 */
+  @State categoryMode: number = 0;
+  /** 每个分类的显示态（与 categories 同序），预计算成状态才能驱动 UI 刷新 */
+  @State catStates: number[] = [];
+  /** 当前地图上的聚合点数（预计算，避免 build 里调方法读状态） */
+  @State shownCount: number = 0;
   @State keyword: string = '';
   @State selectedId: number = 0;
   @State selected: Place | null = null;
@@ -67,6 +73,8 @@ export struct MapTab {
     const c = await PlaceService.categories();
     if (c.ok && c.data !== null) {
       this.categories = c.data;
+      // 分类到位后初始化各 tag 的显示态
+      this.refreshCluster();
     }
   }
 
@@ -112,6 +120,14 @@ export struct MapTab {
     }
     const b = this.lastBounds;
     this.clusters = this.clusterer.query(b[0], b[1], b[2], b[3], this.zoom);
+
+    // 预计算展示状态：方法内读 @State 不会被 ArkUI 追踪，必须落到状态变量上
+    this.shownCount = list.length;
+    const st: number[] = [];
+    for (const c of this.categories) {
+      st.push(this.activeCategory === c.name ? this.categoryMode : 0);
+    }
+    this.catStates = st;
   }
 
   /** 点击聚合水滴：把地图放大到该聚合拆开后的下一层 */
@@ -191,16 +207,45 @@ export struct MapTab {
     }
   }
 
+  /**
+   * 分类三态筛选：0 无筛选 / 1 只看该分类 / 2 排除该分类。
+   * 点一次选中、再点一次变成排除、第三次恢复；切换分类时其它 tag 自动回到普通态。
+   */
+  private cycleCategory(name: string): void {
+    if (this.activeCategory === name) {
+      if (this.categoryMode === 1) {
+        this.categoryMode = 2;
+      } else {
+        this.activeCategory = '';
+        this.categoryMode = 0;
+      }
+    } else {
+      this.activeCategory = name;
+      this.categoryMode = 1;
+    }
+    this.refreshCluster();
+  }
+
+  private categoryStateOf(name: string): number {
+    return this.activeCategory === name ? this.categoryMode : 0;
+  }
+
   private filtered(): Place[] {
-    if (this.activeCategory.length === 0) return this.places;
+    if (this.activeCategory.length === 0 || this.categoryMode === 0) {
+      return this.places;
+    }
     const out: Place[] = [];
     for (const p of this.places) {
       const parts = splitCategory(p.category);
+      let hit = false;
       for (const s of parts) {
         if (s === this.activeCategory) {
-          out.push(p);
+          hit = true;
           break;
         }
+      }
+      if (this.categoryMode === 1 ? hit : !hit) {
+        out.push(p);
       }
     }
     return out;
@@ -310,29 +355,35 @@ export struct MapTab {
         .borderRadius(Theme.R_FULL)
         .shadow(Theme.cardShadow())
 
-        // 分类
+        // 分类（横向滚动；点击依赖 PillTag 内部的 onClick + catStates 预计算）
         Scroll() {
-          Row({ space: 8 }) {
+          Row() {
             Column() {
               PillTag({
                 text: '全部',
-                active: this.activeCategory.length === 0
+                state: this.activeCategory.length === 0 ? 1 : 0,
+                onTap: () => {
+                  this.activeCategory = '';
+                  this.categoryMode = 0;
+                  this.refreshCluster();
+                }
               })
             }
-            .onClick(() => {
-              this.activeCategory = '';
-              this.refreshCluster();
-            })
+            .margin({ right: 8 })
 
-            ForEach(this.categories, (c: Category) => {
+            ForEach(this.categories, (c: Category, idx: number) => {
               Column() {
-                PillTag({ text: c.name, active: this.activeCategory === c.name })
+                PillTag({
+                  text: c.name,
+                  state: idx < this.catStates.length ? this.catStates[idx] : 0,
+                  onTap: () => {
+                    this.cycleCategory(c.name);
+                  }
+                })
               }
-              .onClick(() => {
-                this.activeCategory = c.name;
-                this.refreshCluster();
-              })
-            }, (c: Category) => `${c.id}`)
+              .margin({ right: 8 })
+            }, (c: Category, idx: number) =>
+              `${c.id}-${idx < this.catStates.length ? this.catStates[idx] : 0}`)
           }
           .padding({ right: 12 })
         }
@@ -410,7 +461,7 @@ export struct MapTab {
                 .backgroundColor($r('app.color.tint'))
                 .borderRadius(Theme.R_FULL)
             }
-            Text(`${this.filtered().length} 家`)
+            Text(`${this.shownCount} 家`)
               .fontSize(Theme.F_CAP)
               .fontColor($r('app.color.ink_soft'))
               .padding({ left: 8, right: 8, top: 4, bottom: 4 })

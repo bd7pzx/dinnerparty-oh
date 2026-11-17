@@ -49,17 +49,48 @@ export struct SectionCard {
 
 @Component
 export struct PillTag {
-  text: string = '';
-  active: boolean = false;
+  @Prop text: string = '';
+  @Prop active: boolean = false;
+  /** 0 普通；1 选中（包含筛选）；2 排除筛选 */
+  @Prop state: number = 0;
   tone: string = 'primary';
+  onTap: () => void = () => {
+  };
+
+  private bg(): ResourceColor {
+    if (this.state === 1) {
+      return $r('app.color.primary');
+    }
+    if (this.state === 2) {
+      return $r('app.color.danger');
+    }
+    return $r('app.color.tint');
+  }
+
+  private fg(): ResourceColor {
+    if (this.state === 1) {
+      return $r('app.color.on_primary');
+    }
+    if (this.state === 2) {
+      return Color.White;
+    }
+    return $r('app.color.ink_soft');
+  }
 
   build() {
     Text(this.text)
       .fontSize(Theme.F_SM)
-      .fontColor(this.active ? $r('app.color.on_primary') : $r('app.color.ink_soft'))
-      .backgroundColor(this.active ? $r('app.color.primary') : $r('app.color.tint'))
+      .fontColor(this.fg())
+      .backgroundColor(this.bg())
       .padding({ left: 12, right: 12, top: 6, bottom: 6 })
       .borderRadius(Theme.R_FULL)
+      .border({
+        width: this.state === 2 ? 1 : 0,
+        color: this.state === 2 ? Color.White : Color.Transparent
+      })
+      .onClick(() => {
+        this.onTap();
+      })
   }
 }
 
