@@ -1119,7 +1119,7 @@ export struct MapTab {  @State places: Place[] = [];
               // 单个信息卡：横屏时限制宽度，避免在宽屏上拉成一条
               .height(CARD_H)
               // 单个信息卡：横屏时限制宽度，避免在宽屏上拉成一条
-              .width(this.isWide ? 460 : '100%')
+              .width(this.isWide ? 460 : 340)
               .padding(Theme.S_MD)
               .backgroundColor($r('app.color.surface'))
               .borderRadius(Theme.R_LG)
