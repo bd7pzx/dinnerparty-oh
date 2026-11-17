@@ -437,8 +437,8 @@ entry/src/main/resources/dark/element/color.json
 ```
 
 - 组件里统一用 `$r('app.color.xxx')`（共替换 177 处引用）；
-- 三种模式并存（\Store.themeMode\）：\system\ 跟随系统（\COLOR_MODE_NOT_SET\）、\light\、\dark\；
-  - 切换用系统级 \pplicationContext.setColorMode(...)\，由系统重载资源配置，**整棵树即时重绘**，不是重启生效；
+- 三种模式并存（`Store.themeMode`）：`system` 跟随系统（`COLOR_MODE_NOT_SET`）、`light`、`dark`；
+- 切换用系统级 `applicationContext.setColorMode(...)`，由系统重载资源配置，**整棵树即时重绘**，不是重启生效；
 - 启动时也按已保存偏好调用一次，避免重启后主题与开关不一致；
 - 系统栏图标随主题切换明暗，保持可读；
 - **地图同步**：`AmapView` 用 `@StorageProp('dark') @Watch` 监听，切换时 `setMapType(MAP_TYPE_NIGHT / MAP_TYPE_NORMAL)`，UI 与底图风格一致。
