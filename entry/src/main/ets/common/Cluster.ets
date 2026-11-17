@@ -17,7 +17,8 @@ export enum ClusterScale {
   BLOCK = 1,
   DISTRICT = 2,
   CITY = 3,
-  PROVINCE = 4
+  PROVINCE = 4,
+  COUNTRY = 5
 }
 
 export interface ClusterPoint {
@@ -67,7 +68,10 @@ export function scaleOf(zoom: number): ClusterScale {
   if (zoom >= 9) {
     return ClusterScale.CITY;
   }
-  return ClusterScale.PROVINCE;
+  if (zoom >= 6) {
+    return ClusterScale.PROVINCE;
+  }
+  return ClusterScale.COUNTRY;
 }
 
 export function scaleLabel(scale: ClusterScale): string {
@@ -82,6 +86,9 @@ export function scaleLabel(scale: ClusterScale): string {
   }
   if (scale === ClusterScale.PROVINCE) {
     return '省';
+  }
+  if (scale === ClusterScale.COUNTRY) {
+    return '国';
   }
   return '';
 }
