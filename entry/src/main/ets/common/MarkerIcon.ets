@@ -121,7 +121,7 @@ export class MarkerIcon {
     return MarkerIcon.scaleTo(img, w, h, size.width, size.height);
   }
 
-  /** 水滴外形：上圆 + 下尖，用矢量画出来才能保证底色是真半透明 */
+  /** 水滴外形（保留备用，当前走 PNG 底图） */
   private static dropPath(w: number, h: number): drawing.Path {
     const path = new drawing.Path();
     const cx = w * 0.5;
@@ -136,13 +136,16 @@ export class MarkerIcon {
   }
 
   /**
-   * 生成聚合图标：矢量水滴（半透明白底 + 粉色描边）+ 数量数字。
-   * 不再叠 PNG——位图经过 PixelMap 合成后 alpha 会被吃掉，显示成实心块。
+   * 生成聚合图标：水滴 PNG 铺底 + 数量数字。
    * @param scale 聚合缩放（1.0 ~ 1.3）
    * @param text 已格式化的数量文本（如 12 / 1.2k）
    * @param fontVp 字号（vp），会乘 density 换成像素
    */
   static cluster(scale: number, text: string, fontVp: number): image.PixelMap | undefined {
+    const base = MarkerIcon.base;
+    if (base === null) {
+      return undefined;
+    }
     const s = scale <= 0 ? 1 : scale;
     const w = Math.max(1, Math.round(BASE_W * s));
     const h = Math.max(1, Math.round(BASE_H * s));
@@ -152,28 +155,11 @@ export class MarkerIcon {
         return undefined;
       }
       const canvas = new drawing.Canvas(pm);
-      const path = MarkerIcon.dropPath(w, h);
-
-      // 半透明白底
-      const fill = new drawing.Brush();
-      const fillColor: common2D.Color = {
-        alpha: FILL_ALPHA, red: FILL_R, green: FILL_G, blue: FILL_B
-      };
-      fill.setColor(fillColor);
-      canvas.attachBrush(fill);
-      canvas.drawPath(path);
-      canvas.detachBrush();
-
-      // 粉色描边
-      const pen = new drawing.Pen();
-      const edgeColor: common2D.Color = {
-        alpha: 255, red: EDGE_R, green: EDGE_G, blue: EDGE_B
-      };
-      pen.setColor(edgeColor);
-      pen.setStrokeWidth(Math.max(2, w * 0.045));
-      canvas.attachPen(pen);
-      canvas.drawPath(path);
-      canvas.detachPen();
+      // 底图按 scale 铺满
+      canvas.save();
+      canvas.scale(w / BASE_W, h / BASE_H);
+      canvas.drawImage(base, 0, 0);
+      canvas.restore();
 
       // 字号：按水滴可用宽度自适应，位数多就等比缩小，避免数字溢出边界
       let fontPx = Math.max(8, Math.round(MarkerIcon.vp2px(fontVp) * s));
