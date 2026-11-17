@@ -72,6 +72,8 @@ export struct MapTab {  @State places: Place[] = [];
   /** 最近拉取过的范围（西南→东北 + 时间戳），用于判断能否跳过请求 */
   private fetchedRegions: FetchedRegion[] = [];
   private recentTimer: number = -1;
+  /** 大尺度分块加载的会话号，视野变化即失效 */
+  private loadSeq: number = 0;
   /** 近期点位保留时长 */
   private readonly RECENT_TTL: number = 20000;
   /** 近期点位最多保留多少个（避免聚合器被喂太多点） */
@@ -314,9 +316,60 @@ export struct MapTab {  @State places: Place[] = [];
   }
 
   /**
-   * 视野驱动加载：请求范围 = 可视区 3×3 倍（预取），
-   * 同时把真实视野 view* 报给服务端用于排序。
+   * 大尺度分块加载：把整个 bbox 切成 cols×rows 小块，逐块请求并限速，
+   * 每块回来就并入 places 重新聚合，边加载边出点位。
+   * 视野一变（loadSeq 递增）就放弃剩余块，避免堆积请求。
    */
+  private async loadBigRegion(minLng: number, minLat: number, maxLng: number, maxLat: number): Promise<void> {
+    const seq = ++this.loadSeq;
+    const cols = 4;
+    const rows = 3;
+    const dLng = (maxLng - minLng) / cols;
+    const dLat = (maxLat - minLat) / rows;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (seq !== this.loadSeq) {
+          return;
+        }
+        const x0 = minLng + c * dLng;
+        const y0 = minLat + r * dLat;
+        const x1 = x0 + dLng;
+        const y1 = y0 + dLat;
+        const res = await PlaceService.nearby(x0, y0, x1, y1);
+        if (seq !== this.loadSeq) {
+          return;
+        }
+        if (res.ok && res.data !== null && res.data.length > 0) {
+          this.rememberFetched(x0, y0, x1, y1, res.data);
+          PoiCache.put(res.data);
+          // 并入现有集合（按 id 去重）
+          const seen = new Set<number>();
+          const merged: Place[] = [];
+          for (const p of this.places) {
+            merged.push(p);
+            seen.add(p.id);
+          }
+          for (const p of res.data) {
+            if (!seen.has(p.id)) {
+              merged.push(p);
+              seen.add(p.id);
+            }
+          }
+          this.places = merged;
+          this.refreshCluster();
+        }
+        // 限速，避免连续打满
+        await new Promise<void>((resolve) => {
+          setTimeout(() => {
+            resolve();
+          }, 320);
+        });
+      }
+    }
+    if (seq === this.loadSeq) {
+      this.tip = '';
+    }
+  }
   private async loadRegion(minLng: number, minLat: number, maxLng: number, maxLat: number): Promise<void> {
     if (this.loading) {
       return;
@@ -350,8 +403,10 @@ export struct MapTab {  @State places: Place[] = [];
       if (local.length > 0) {
         this.places = local;
         this.refreshCluster();
-        this.tip = '省/国尺度显示本地缓存的点位，放大地图可加载更多';
       }
+      this.tip = '省/国尺度，分块加载中…';
+      // 大尺度一次拉不完，切成小块顺序补齐，边补边显示
+      this.loadBigRegion(minLng, minLat, maxLng, maxLat);
       return;
     }
     this.loading = true;
@@ -980,8 +1035,9 @@ export struct MapTab {  @State places: Place[] = [];
                 .padding({ left: 10, right: 10, top: 6, bottom: 6 })
                 .backgroundColor($r('app.color.surface'))
                 .borderRadius(Theme.R_SM)
-                .constraintSize({ maxWidth: 230 })
-                .maxLines(3)
+                .constraintSize({ maxWidth: 168 })
+                .maxLines(2)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
                 .shadow(Theme.cardShadow())
             }
           }
