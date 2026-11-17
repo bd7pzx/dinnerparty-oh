@@ -108,10 +108,9 @@ export struct MapTab {  @State places: Place[] = [];
     }
   }
 
-  /** 清理超过 20 秒的近期点位，若有变化就重绘 */
+  /** 清理超过 20 秒的近期点位；只是让「跳过请求」失效，不动当前已显示的 pin */
   private pruneRecent(): void {
     const now = Date.now();
-    let changed = false;
     const drop: number[] = [];
     this.recent.forEach((it: RecentPoi, id: number) => {
       if (now - it.ts > this.RECENT_TTL) {
@@ -120,21 +119,15 @@ export struct MapTab {  @State places: Place[] = [];
     });
     for (const id of drop) {
       this.recent.delete(id);
-      changed = true;
     }
-    // 已拉取范围也过期了
+    // 已拉取范围过期后，下次移动会重新请求
     const keepRegions: FetchedRegion[] = [];
     for (const r of this.fetchedRegions) {
       if (now - r.ts <= this.RECENT_TTL) {
         keepRegions.push(r);
       }
     }
-    if (keepRegions.length !== this.fetchedRegions.length) {
-      this.fetchedRegions = keepRegions;
-    }
-    if (changed) {
-      this.rebuildPlacesFromRecent();
-    }
+    this.fetchedRegions = keepRegions;
   }
 
   /** 用近期点位重建 places（保留当前筛选） */
@@ -347,12 +340,21 @@ export struct MapTab {  @State places: Place[] = [];
     if (r.ok && r.data !== null) {
       // 记下这次拉取的范围与实际预取 bbox，20 秒内再回到这里就不重复请求
       this.rememberFetched(cx - halfLng, cy - halfLat, cx + halfLng, cy + halfLat, r.data);
-      // 合并：线上结果优先，再补上「20 秒内查看过」和本地缓存里这次没返回的点
+      // 合并：线上结果 → 当前已显示的 pin → 20 秒内看过的 → 本地缓存。
+      // 这样刷新过程中地图上的 pin 不会突然消失。
       const merged: Place[] = [];
       const seen = new Set<number>();
       for (const p of r.data) {
         merged.push(p);
         seen.add(p.id);
+      }
+      for (const p of this.places) {
+        const inside = p.longitude >= cx - halfLng && p.longitude <= cx + halfLng &&
+          p.latitude >= cy - halfLat && p.latitude <= cy + halfLat;
+        if (inside && !seen.has(p.id)) {
+          merged.push(p);
+          seen.add(p.id);
+        }
       }
       const now = Date.now();
       this.recent.forEach((it: RecentPoi) => {
@@ -396,7 +398,8 @@ export struct MapTab {  @State places: Place[] = [];
     this.clusters = this.clusterer.query(b[0], b[1], b[2], b[3], this.zoom);
 
     // 预计算展示状态：方法内读 @State 不会被 ArkUI 追踪，必须落到状态变量上
-    this.shownCount = list.length;
+    // 右上角显示的是「当前地图上显示多少 pin」，所以用视野内的聚合节点数
+    this.shownCount = this.clusters.length;
     const st: number[] = [];
     for (const c of this.categories) {
       st.push(this.activeCategory === c.name ? this.categoryMode : 0);

@@ -374,9 +374,13 @@ fy = 44                      // 最小点击区
 - `loadRegion()` 开头先判断目标视野是否被 **20 秒内**拉取过的范围覆盖，命中就
   `rebuildPlacesFromRecent()` 直接渲染，**不发请求**；
 - 拉取成功后把实际预取 bbox（3× 视野）记入 `fetchedRegions`，并把结果并入 `recent`；
-- 合并渲染时线上结果优先，再补 `recent` 里未过期的点，保证滑回去时点位还在；
-- 每 5 秒 `pruneRecent()` 清理过期项（连同过期的 `fetchedRegions`），过期后自然回落到正常请求；
+- **合并时保留当前已显示的 pin**：`线上结果 → 当前 places 中落在 bbox 内的 → 20 秒内看过的 → 本地缓存`，
+  去重合并。所以刷新过程中地图上的点不会突然消失；
+- 每 5 秒 `pruneRecent()` **只清理 `recent` / `fetchedRegions`，不重绘 places**——
+  过期只意味着下次移动视野会重新请求，当前屏幕上的 pin 保持不动；
 - 上限：`recent` 最多 600 个点、`fetchedRegions` 最多 8 个范围，避免聚合器被喂太多点。
+- 右上角「N 家」用 `shownCount = clusters.length`，即**当前地图视野内实际显示的 pin 数**，
+  不是缓存条数也不是筛选后的总条数。
 
 ---
 
