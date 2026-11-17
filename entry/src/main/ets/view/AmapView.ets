@@ -11,9 +11,11 @@ import {
 } from '@amap/amap_lbs_map3d';
 import { AMapPrivacyAgreeStatus, AMapPrivacyInfoStatus, AMapPrivacyShowStatus } from '@amap/amap_lbs_common';
 import { common } from '@kit.AbilityKit';
+import { display } from '@kit.ArkUI';
 import { Theme } from '../common/Theme';
 import { Store } from '../common/Store';
 import { ClusterPoint } from '../common/Cluster';
+import { MarkerIcon } from '../common/MarkerIcon';
 import { Place } from '../model/Types';
 
 /** 用户位置小圆点颜色（#ff0a59f7） */
@@ -24,6 +26,8 @@ export const AMAP_KEY: string = 'f96314c579e55a67c27388e7b32d340e';
 
 const DEFAULT_ZOOM: number = 15;
 const POLL_MS: number = 900;
+/** 标记池上限：单屏超过这个数量就走聚合，不会真到这么多 */
+const POOL_MAX: number = 320;
 
 @Component
 export struct AmapView {
@@ -65,6 +69,10 @@ export struct AmapView {
   private userMarker: Marker | null = null;
   private lastKey: string = '';
   /** key → Marker，用于增量更新（避免每次 clear 重建全部标记） */
+  /** Marker 池：复用同一批标记，避免频繁 addMarker/remove */
+  private pool: Marker[] = [];
+  /** 当前被隐藏的池槽位，避免重复调 setVisible(false) */
+  private hiddenSlots: number[] = [];
   private markerByKey: Map<string, Marker> = new Map<string, Marker>();
   /** key → 当前数量，数量变化时才换图标 */
   private countByKey: Map<string, number> = new Map<string, number>();
@@ -73,6 +81,14 @@ export struct AmapView {
 
   aboutToAppear(): void {
     const ctx = getContext(this) as common.UIAbilityContext;
+    // 直绘图标需要先拿到密度并解码底图，放在 SDK 初始化旁边，尽量早
+    try {
+      const d = display.getDefaultDisplaySync();
+      MarkerIcon.setDensity(d.densityPixels);
+    } catch (err) {
+      // 取不到密度时用默认 3
+    }
+    MarkerIcon.prepare(ctx);
     try {
       MapsInitializer.updatePrivacyShow(AMapPrivacyShowStatus.DidShow, AMapPrivacyInfoStatus.DidContain, ctx);
       MapsInitializer.updatePrivacyAgree(AMapPrivacyAgreeStatus.DidAgree, ctx);
@@ -315,16 +331,43 @@ export struct AmapView {
     .clip(true)
   }
 
-  /** 单点图标（走 fromView 才能按 vp 缩放） */
-  private async placeIcon(): Promise<BitmapDescriptor | undefined> {
+  /** 生成并缓存聚合徽标图标（drawing 直绘，同步完成） */
+  private clusterIcon(count: number): BitmapDescriptor | undefined {
+    const hit = this.iconCache.get(count);
+    if (hit !== undefined) {
+      return hit;
+    }
+    try {
+      const text = this.countText(count);
+      const scale = this.clusterScale(count);
+      const fontVp = this.countFontSize(text, scale);
+      const pm = MarkerIcon.cluster(scale, text, fontVp);
+      if (pm === undefined) {
+        return undefined;
+      }
+      const desc = BitmapDescriptorFactory.fromPixelMapSync(pm);
+      if (desc !== undefined && desc !== null) {
+        this.iconCache.set(count, desc);
+        return desc;
+      }
+    } catch (err) {
+      // 生成失败时退回兜底图
+    }
+    return undefined;
+  }
+
+  /** 单点图标（drawing 直绘，同步完成） */
+  private placeIcon(): BitmapDescriptor | undefined {
     const hit = this.iconCache.get(-1);
     if (hit !== undefined) {
       return hit;
     }
     try {
-      const desc = await BitmapDescriptorFactory.fromView(() => {
-        this.placeMarker();
-      });
+      const pm = MarkerIcon.place();
+      if (pm === undefined) {
+        return undefined;
+      }
+      const desc = BitmapDescriptorFactory.fromPixelMapSync(pm);
       if (desc !== undefined && desc !== null) {
         this.iconCache.set(-1, desc);
         return desc;
@@ -335,116 +378,79 @@ export struct AmapView {
     return undefined;
   }
 
-  /** 生成并缓存聚合徽标图标 */
-  private async clusterIcon(count: number): Promise<BitmapDescriptor | undefined> {
-    const hit = this.iconCache.get(count);
-    if (hit !== undefined) {
-      return hit;
-    }
-    try {
-      const desc = await BitmapDescriptorFactory.fromView(() => {
-        this.clusterMarker(count);
-      });
-      if (desc !== undefined && desc !== null) {
-        this.iconCache.set(count, desc);
-        return desc;
-      }
-    } catch (err) {
-      // 生成失败时退回默认图标
-    }
-    return undefined;
-  }
-
   /**
-   * 增量同步标记：只增删差集、数量变化才换图标，
-   * 避免每次视野刷新都 clear() 重建全部 Marker（那是卡顿的根源）。
+   * 同步标记（Marker 池化）。
+   *
+   * 不再 addMarker/remove：一次性建好 POOL_MAX 个空标记，之后只改 position / icon / visible。
+   * 高德的 addMarker 与 remove 都会走原生图钉的创建与销毁，视野频繁变化时开销明显；
+   * 复用同一批标记只做属性更新，标记 id 也保持不变，点击回调的映射表仍然有效。
    */
   private async syncMarkers(): Promise<void> {
     if (this.aMap === null) {
       return;
     }
     const map = this.aMap;
-    const alive = new Set<string>();
-    for (const c of this.clusters) {
-      alive.add(c.key);
+    const want = this.clusters.length;
+
+    // 1. 池不足时扩容（只增不减，避免反复创建销毁）
+    while (this.pool.length < want && this.pool.length < POOL_MAX) {
+      const opts = new MarkerOptions();
+      opts.setPosition(new LatLng(0, 0));
+      opts.setVisible(false);
+      const m = map.addMarker(opts);
+      if (m === undefined || m === null) {
+        break;
+      }
+      this.pool.push(m);
     }
 
-    // 统计本轮新增的聚合点
+    // 2. 逐个槽位绑定或隐藏
+    for (let i = 0; i < this.pool.length; i++) {
+      const m = this.pool[i];
+      if (m === undefined || m === null) {
+        continue;
+      }
+      if (i < want) {
+        const c = this.clusters[i];
+        const prevCount = this.countByKey.get(c.key);
+        m.setPosition(new LatLng(c.lat, c.lng));
+        m.setTitle(c.count >= 2 ? `${c.count} 家` : c.name);
+        if (prevCount === undefined || prevCount !== c.count) {
+          const icon = c.count >= 2 ? this.clusterIcon(c.count) : this.placeIcon();
+          if (icon !== undefined) {
+            m.setIcon(icon);
+          }
+        }
+        m.setVisible(true);
+        this.countByKey.set(c.key, c.count);
+        this.idToCluster.set(m.getId(), c);
+      } else {
+        if (this.hiddenSlots.indexOf(i) < 0) {
+          m.setVisible(false);
+          this.idToCluster.delete(m.getId());
+          this.hiddenSlots.push(i);
+        }
+      }
+    }
+    // 槽位被重新启用后要把它从隐藏列表里移除
+    const kept: number[] = [];
+    for (const s of this.hiddenSlots) {
+      if (s >= want) {
+        kept.push(s);
+      }
+    }
+    this.hiddenSlots = kept;
+
     let fresh = 0;
     for (const c of this.clusters) {
-      if (c.count >= 2 && !this.markerByKey.has(c.key)) {
+      if (c.count >= 2) {
         fresh++;
       }
     }
     this.freshCount = fresh;
 
-    // 1. 移除已消失的
-    const gone: string[] = [];
-    this.markerByKey.forEach((m: Marker, k: string) => {
-      if (!alive.has(k)) {
-        gone.push(k);
-      }
-    });
-    for (const k of gone) {
-      const m = this.markerByKey.get(k);
-      this.markerByKey.delete(k);
-      this.countByKey.delete(k);
-      if (m !== undefined && m !== null) {
-        this.idToCluster.delete(m.getId());
-        m.remove();
-      }
-    }
-
-    // 2. 首帧不等图标：聚合点用同步加载的水滴兜底图（尺寸已裁剪），单点用缓存的矢量图标
-    for (const c of this.clusters) {
-      const exist = this.markerByKey.get(c.key);
-      if (exist !== undefined && exist !== null) {
-        const prevCount = this.countByKey.get(c.key);
-        if (prevCount !== c.count) {
-          const cached = this.iconCache.get(c.count);
-          if (cached !== undefined) {
-            exist.setIcon(cached);
-          } else if (c.count >= 2) {
-            const fb = this.fallbackClusterIcon();
-            if (fb !== undefined) {
-              exist.setIcon(fb);
-            }
-          }
-          this.countByKey.set(c.key, c.count);
-        }
-        this.idToCluster.set(exist.getId(), c);
-        continue;
-      }
-
-      const opts = new MarkerOptions();
-      opts.setPosition(new LatLng(c.lat, c.lng));
-      opts.setTitle(c.count >= 2 ? `${c.count} 家` : c.name);
-      let icon: BitmapDescriptor | undefined;
-      if (c.count >= 2) {
-        icon = this.iconCache.get(c.count);
-        if (icon === undefined) {
-          icon = this.fallbackClusterIcon();
-        }
-      } else {
-        // 单点图标只有一张，首次生成后即命中缓存
-        icon = this.iconCache.get(-1);
-        if (icon === undefined) {
-          icon = await this.placeIcon();
-        }
-      }
-      if (icon !== undefined) {
-        opts.setIcon(icon);
-      }
-      const marker = map.addMarker(opts);
-      if (marker !== undefined && marker !== null) {
-        this.markerByKey.set(c.key, marker);
-        this.countByKey.set(c.key, c.count);
-        this.idToCluster.set(marker.getId(), c);
-      }
-    }
-
-    // 3. 后台补齐图标（并行生成，完成后统一替换）
-    this.ensureIcons();
+    // 3. 预热常见数量，避免后续缩放现算
+    this.warmUp();
   }
 
   /** 后台并行生成缺失的图标，完成后刷新屏幕上的标记 */
@@ -471,7 +477,7 @@ export struct AmapView {
 
   /**
    * 兜底聚合图标：直接用 rawfile 里的水滴图（不含数字）。
-   * 冷启动时 fromView 渲染管线还没就绪，生成会失败，若不管就会退回高德默认蓝水滴。
+   * 直绘失败时用它，避免出现高德的默认蓝水滴。
    */
   private fallbackClusterIcon(): BitmapDescriptor | undefined {
     const hit = this.iconCache.get(-3);
@@ -491,57 +497,38 @@ export struct AmapView {
     return undefined;
   }
 
-  private async prepareIcon(c: ClusterPoint): Promise<BitmapDescriptor | undefined> {
-    const first = c.count >= 2 ? await this.clusterIcon(c.count) : await this.placeIcon();
-    if (first !== undefined) {
-      return first;
-    }
-    // 并发渲染时 fromView 偶发失败，稍后重试一次
-    await new Promise<void>((resolve) => {
-      setTimeout(() => {
-        resolve();
-      }, 80);
-    });
-    const second = c.count >= 2 ? await this.clusterIcon(c.count) : await this.placeIcon();
-    if (second !== undefined) {
-      return second;
-    }
-    // 聚合点用无水滴图兜底，避免出现高德的默认蓝水滴
-    return c.count >= 2 ? this.fallbackClusterIcon() : second;
-  }
   private warmUp(): void {
     setTimeout(() => {
       this.warmLoop(2);
-    }, 1500);
+    }, 600);
   }
 
-  private async warmLoop(n: number): Promise<void> {
-    if (n > 40 || this.iconCache.has(n)) {
-      if (n > 40) {
-        return;
+  /** 预热 2~40 的聚合图标：直绘很便宜，一次跑完即可，之后缩放换级直接命中 */
+  private warmLoop(n: number): void {
+    for (let i = n; i <= 40; i++) {
+      if (!this.iconCache.has(i)) {
+        this.clusterIcon(i);
       }
     }
-    await this.clusterIcon(n);
-    if (n < 40) {
-      this.warmLoop(n + 1);
-    } else {
-      // 预热结束：把启动时用兜底图标的聚合点换成带数字的
-      this.refreshClusterIcons();
-    }
+    // 预热后把启动时落在兜底图上的聚合点换成带数字的
+    this.refreshClusterIcons();
   }
 
   /** 预热完成后，给已在屏幕上的聚合点补上带数字的图标 */
   private refreshClusterIcons(): void {
-    this.markerByKey.forEach((marker: Marker, key: string) => {
+    for (const marker of this.pool) {
+      if (marker === undefined || marker === null) {
+        continue;
+      }
       const c = this.idToCluster.get(marker.getId());
       if (c === undefined || c.count < 2) {
-        return;
+        continue;
       }
       const icon = this.iconCache.get(c.count);
       if (icon !== undefined) {
         marker.setIcon(icon);
       }
-    });
+    }
   }
 
   private recenter(): void {
