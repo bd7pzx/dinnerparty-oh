@@ -246,23 +246,22 @@ struct Index {
         }
         .tabBar(this.tabBarItem(0, '地', '地图'))
 
-        // 未登录时不渲染这两页：收藏要账号身份、同好依赖口味画像
-        if (this.loggedIn) {
-          TabContent() {
-            this.tabPage(1)
-          }
-          .tabBar(this.tabBarItem(1, '收', '收藏'))
-
-          TabContent() {
-            this.tabPage(2)
-          }
-          .tabBar(this.tabBarItem(2, '邻', '同好'))
+        // 未登录时只把 tabBar 换成空占位，TabContent 数量保持 4 个不变——
+        // 动态增删 TabContent 会让 HdsTabs 的索引错乱，出现两页内容并排显示。
+        TabContent() {
+          this.tabPage(1)
         }
+        .tabBar(this.loggedIn ? this.tabBarItem(1, '收', '收藏') : this.hiddenBar())
+
+        TabContent() {
+          this.tabPage(2)
+        }
+        .tabBar(this.loggedIn ? this.tabBarItem(2, '邻', '同好') : this.hiddenBar())
 
         TabContent() {
           this.tabPage(3)
         }
-        .tabBar(this.profileTabBar(this.loggedIn ? 3 : 1))
+        .tabBar(this.profileTabBar(3))
       }
       .barPosition(BarPosition.End)
       .barMode(BarMode.Fixed)
@@ -394,6 +393,14 @@ struct Index {
     .translate({ y: this.currentTab === idx ? -2 : 0 })
     .opacity(this.currentTab === idx ? 1 : 0.82)
     .animation({ duration: 320, curve: curves.springMotion() })
+  }
+
+  /** 占位页签：未登录时隐藏「收藏 / 同好」 */
+  @Builder
+  hiddenBar() {
+    Column()
+      .width('100%')
+      .height('100%')
   }
 
   /** 第 4 个页签：未登录显示「我 / 我的」，登录后显示服务端头像 + 用户名 */

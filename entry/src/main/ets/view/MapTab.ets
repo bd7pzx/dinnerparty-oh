@@ -1220,7 +1220,7 @@ export struct MapTab {  @State places: Place[] = [];
             }, (c: Category, idx: number) =>
               `${c.id}-${idx < this.catStates.length ? this.catStates[idx] : 0}`)
           }
-          .padding({ right: 12 })
+          .padding({ left: 0, right: 0 })
         }
         .scrollable(ScrollDirection.Horizontal)
         .scrollBar(BarState.Off)
