@@ -16,6 +16,9 @@ import { Store } from '../common/Store';
 import { ClusterPoint } from '../common/Cluster';
 import { Place } from '../model/Types';
 
+/** 用户位置小圆点颜色（#ff0a59f7） */
+const USER_DOT_COLOR: string = '#0A59F7';
+
 /** 高德 Key（HarmonyOS 平台） */
 export const AMAP_KEY: string = 'f96314c579e55a67c27388e7b32d340e';
 
@@ -31,6 +34,9 @@ export struct AmapView {
   @Prop @Watch('onCenterChanged') centerLng: number = 113.2442;
   /** centerZoom 也要参与 watch，否则「点聚合点放大」只改缩放不改中心时不会触发相机移动 */
   @Prop @Watch('onCenterChanged') centerZoom: number = DEFAULT_ZOOM;
+  /** 用户当前位置（0 表示尚未定位），用于画小圆点 */
+  @Prop @Watch('onUserMoved') userLat: number = 0;
+  @Prop @Watch('onUserMoved') userLng: number = 0;
 
   onPick: (p: Place) => void = () => {
   };
@@ -55,6 +61,8 @@ export struct AmapView {
   private idToCluster: Map<string, ClusterPoint> = new Map<string, ClusterPoint>();
   private iconCache: Map<number, BitmapDescriptor> = new Map<number, BitmapDescriptor>();
   private pollTimer: number = -1;
+  /** 用户当前位置小圆点（独立于聚合标记，不受 clear 影响） */
+  private userMarker: Marker | null = null;
   private lastKey: string = '';
   /** key → Marker，用于增量更新（避免每次 clear 重建全部标记） */
   private markerByKey: Map<string, Marker> = new Map<string, Marker>();
@@ -106,6 +114,7 @@ export struct AmapView {
         });
         this.moveTo(this.centerLat, this.centerLng, this.centerZoom);
         this.syncMarkers();
+        this.syncUserMarker();
         this.startPoll();
         this.warmUp();
       });
@@ -131,6 +140,64 @@ export struct AmapView {
 
   onClustersChanged(): void {
     this.syncMarkers();
+  }
+
+  /** 用户位置变化：更新小圆点 */
+  onUserMoved(): void {
+    this.syncUserMarker();
+  }
+
+  /** 用户位置小圆点图标（纯矢量，无图片加载） */
+  @Builder
+  userDot() {
+    Column()
+      .width(vp2px(6))
+      .height(vp2px(6))
+      .borderRadius(vp2px(3))
+      .backgroundColor(USER_DOT_COLOR)
+      .border({ width: vp2px(1.2), color: Color.White })
+      .shadow({ radius: vp2px(2), color: 'rgba(10,89,247,0.4)', offsetX: 0, offsetY: vp2px(1) })
+  }
+
+  private async userDotIcon(): Promise<BitmapDescriptor | undefined> {
+    const hit = this.iconCache.get(-2);
+    if (hit !== undefined) {
+      return hit;
+    }
+    try {
+      const desc = await BitmapDescriptorFactory.fromView(() => {
+        this.userDot();
+      });
+      if (desc !== undefined && desc !== null) {
+        this.iconCache.set(-2, desc);
+        return desc;
+      }
+    } catch (err) {
+      // 失败时用默认图标
+    }
+    return undefined;
+  }
+
+  private async syncUserMarker(): Promise<void> {
+    if (this.aMap === null || this.userLat === 0 || this.userLng === 0) {
+      return;
+    }
+    const pos = new LatLng(this.userLat, this.userLng);
+    if (this.userMarker !== null) {
+      this.userMarker.setPosition(pos);
+      return;
+    }
+    const icon = await this.userDotIcon();
+    const opts = new MarkerOptions();
+    opts.setPosition(pos);
+    opts.setTitle('我的位置');
+    // 圆点以中心对齐坐标
+    opts.setAnchor(0.5, 0.5);
+    if (icon !== undefined) {
+      opts.setIcon(icon);
+    }
+    const added = this.aMap.addMarker(opts);
+    this.userMarker = added === undefined ? null : added;
   }
 
   private moveTo(lat: number, lng: number, zoom: number): void {
@@ -380,7 +447,17 @@ export struct AmapView {
     }
   }
 
-  private prepareIcon(c: ClusterPoint): Promise<BitmapDescriptor | undefined> {
+  private async prepareIcon(c: ClusterPoint): Promise<BitmapDescriptor | undefined> {
+    const first = c.count >= 2 ? await this.clusterIcon(c.count) : await this.placeIcon();
+    if (first !== undefined) {
+      return first;
+    }
+    // 并发渲染时 fromView 偶发失败，稍后重试一次，避免退回高德默认蓝水滴
+    await new Promise<void>((resolve) => {
+      setTimeout(() => {
+        resolve();
+      }, 80);
+    });
     return c.count >= 2 ? this.clusterIcon(c.count) : this.placeIcon();
   }
   private warmUp(): void {

@@ -307,6 +307,21 @@ fy = 44                      // 最小点击区
   取该店第一次以单点（`count === 1`）出现的层级作为目标 zoom，
   保证抽到的店一定在屏幕上单独显示，而不是被合进聚合水滴。
 
+### 6.10 用户当前位置小圆点
+
+- 位置来自 `common/Location.ets` 的 `getFix()`（`geoLocationManager.getCurrentLocation`），
+  `MapTab` 启动时定位一次，结果同时写入 `centerLat/centerLng`（相机）和 `userLat/userLng`（圆点）。
+- `AmapView` 用 `@Prop @Watch('onUserMoved')` 接收坐标，画一个独立 Marker：
+  直径 6vp、`borderRadius` 做圆、颜色 `#0A59F7`（即 `#ff0a59f7`）、白色 1.2vp 描边 + 淡蓝投影。
+- 圆点走 `BitmapDescriptorFactory.fromView` 生成（纯矢量，不加载图片），
+  锚点设为 `(0.5, 0.5)` 让圆心对齐坐标。
+- 它不参与聚合、不会被 `syncMarkers` 的差集删除，定位失败（`userLat === 0`）时不创建。
+- 没有使用高德内置的 `setMyLocationEnabled` 定位图层：那套需要自己实现 `LocationSource`
+  喂系统定位，且内置样式是水滴形 marker，与「小圆点」的要求不符。
+
+> 另外给 marker 图标加了失败重试：`fromView` 并发渲染时偶发返回 undefined，
+> 之前会退回高德默认的蓝色水滴图标；现在失败后延迟 80ms 再试一次。
+
 ---
 
 ## 七、沉浸式 · 悬浮导航 · 深色模式

@@ -36,6 +36,9 @@ export struct MapTab {
   @State centerLat: number = 23.1189;
   @State centerLng: number = 113.2442;
   @State centerZoom: number = 15;
+  /** 用户当前位置（0 表示未定位成功），地图上画小圆点 */
+  @State userLat: number = 0;
+  @State userLng: number = 0;
   @State locating: boolean = false;
   /** 当前缩放与聚合结果 */
   @State zoom: number = 15;
@@ -61,6 +64,9 @@ export struct MapTab {
     if (fix.ok && fix.pos !== null) {
       this.centerLat = fix.pos.lat;
       this.centerLng = fix.pos.lng;
+      // 用户位置小圆点
+      this.userLat = fix.pos.lat;
+      this.userLng = fix.pos.lng;
       this.tip = '';
     } else {
       this.tip = fix.message;
@@ -401,6 +407,8 @@ export struct MapTab {
               centerLat: this.centerLat,
               centerLng: this.centerLng,
               centerZoom: this.centerZoom,
+              userLat: this.userLat,
+              userLng: this.userLng,
               onPick: (p: Place) => {
                 this.selected = p;
                 this.selectedId = p.id;
