@@ -31,11 +31,10 @@ entry/src/main/ets/
 │   ├── MapCanvas.ets                  自绘地图（高德不可用时的降级底图）
 │   ├── MapTab.ets                     地图页：搜索 / 分类 / 今天吃什么 / 视野加载 / 浮层
 │   ├── PlaceDetail.ets                详情：评分四档、到店打卡、收藏
-│   ├── JourneyTab.ets                 行程页：能力开关 + 四段式提交 + 列表
 │   ├── FavoritesTab.ets               收藏页（独立页签）：收藏地点 + 收藏夹管理
 │   ├── CommunityTab.ets               同好页：口味星图 + 公开收藏夹 + 发现设置
 │   └── ProfileTab.ets                 我的：登录 / 口味 / 设置 / 关于
-└── pages/Index.ets                    主容器：隐私同意门 + 五页签（地图/行程/收藏/同好/我的）
+└── pages/Index.ets                    主容器：隐私同意门 + 四页签（地图/收藏/同好/我的）
 ```
 
 ---
@@ -131,9 +130,9 @@ GET /places/nearby?minLng&minLat&maxLng&maxLat          // 3× 预取范围
 | 风控 `risk{probability,threshold,model_version}` 与 `quota` 下发 | 详情页展示概率、阈值、今日剩余次数 |
 | 打卡 `visit-50m-10min-v1`：50m、精度 25m、≥11 帧、驻留 >10min、断链 90s 重置、出圈清零、15min 上限 | `VisitService.VisitSession` |
 | 题库由服务端下发，前端回 `answer` | `VisitSession.submitEvidence()` / `answer()` |
-| 行程四段式：PUT 草稿 → rank → map-preview（出 hash）→ commit | `JourneyService` / `JourneyTab.runPipeline()` |
+| 行程四段式：PUT 草稿 → rank → map-preview（出 hash）→ commit | `JourneyService`（UI 已移除，待重做） |
 | `preview_hash` 缺失/过期 → 409 `preview_stale` | 提交前强校验，页面输出步骤日志 |
-| `/capabilities` 四开关 + `journey-v1` | 行程页能力 chips |
+| `/capabilities` 四开关 + `journey-v1` | 已移除对应 UI |
 | `/neighbors` 是口味近邻，x/y 由后端下发 | `CommunityTab.drawStar()` 仅线性映射 |
 | 「今天吃什么」= `POST /api/community/draw` | `MapTab.drawOne()` |
 | 登录 `username+password+client[platform]+client[app_version]`，`request_id` 在 query | `ApiClient.formOf()` |
@@ -146,7 +145,7 @@ GET /places/nearby?minLng&minLat&maxLng&maxLat          // 3× 预取范围
 
 ### 5.1 收藏（独立页签）
 
-底部导航第 3 项「收藏」，对应 `FavoritesTab.ets`：
+底部导航第 2 项「收藏」，对应 `FavoritesTab.ets`：
 
 - **我收藏的地点**：`GET /api/favorites`，展示名称 / 分类 / 评分均值 / 人均 / 地址，可「取消收藏」（`DELETE /api/favorites/{id}`），点击进详情。
 - **收藏夹**：`GET|POST|PUT|DELETE /api/community/collections`，支持新建、删除；提示文案沿用原项目「收藏夹默认私密，公开后可以让他人看见」。
@@ -520,7 +519,7 @@ this.materialLevel = types.indexOf(hdsMaterial.MaterialType.IMMERSIVE) < 0
 内容侧：`barOverlap(true)` 让页面延伸到栏下，各页统一 `padding.bottom = 92 + safeBottom`，
 保证末尾内容不被悬浮栏压住，同时让地图底边与悬浮栏之间留出呼吸间距。
 
-### 7.3 第 5 个页签：登录后显示头像
+### 7.3 第 4 个页签：登录后显示头像
 
 - 未登录：`我 / 我的`
 - 已登录：圆形头像 + 用户名（如「冬瓜」）
@@ -578,7 +577,6 @@ devecocli signature generate           # 生成调试签名
 - 地图页：高德底图正常出图、按定位居中（实测中山）、真实店铺标记、分类 chips 来自 `/categories`
 - **视野驱动生效**：拖动地图后按新区间重新请求，标记数随视野变化（20 → 41 → 37）
 - 地点详情：真实字段（分类多值、人均、评分均值），评分 1–4 与打卡规则展示
-- 行程页：四能力开关、四段式表单、候选店、已有行程
 - 同好页：口味星图 + 30 位真实近邻（后端下发坐标）+ 公开收藏夹 / 发现设置双分段
 - 收藏页：收藏地点列表 + 收藏夹管理，独立成页签
 - 发现设置：三个授权开关 + 兴趣标签 + 交互记录 17 条（真实）+ 90 天留存说明；保存后 `version` 1 → 2
@@ -592,7 +590,7 @@ devecocli signature generate           # 生成调试签名
 
 按需求移除的界面元素：
 
-- 行程页顶部「行程工作台」卡片（能力开关与流程说明）—— 直接进入「新建一趟」
+- **行程页整体移除**（页签、JourneyTab.ets 一并删除）：原四段式链路需要重新研究实现，`JourneyService.ets` 保留备用
 - 同好页口味近邻上方的坐标说明文字
 - 我的页「关于」卡片
 - 我的口味每项的「依据 evidence/embedding」字样，只保留强度百分比
@@ -611,7 +609,7 @@ devecocli signature generate           # 生成调试签名
 - 修复（系统性，不是补一处）：
   - `Collection.place_ids`、`Collection.places`、`Neighbor.shared`、`Journey.stops` 全部改为可选类型；
   - 新增 `collectionCount()` / `sharedText()` / `stopCount()` / `stopNames()` 统一兜底；
-  - `CommunityTab.load()` 与 `JourneyTab` 对容器字段做 `undefined/null → []` 归一；
+  - `CommunityTab.load()` 对容器字段做 `undefined/null → []` 归一；
   - `SectionCard` 的 `title/subtitle` 改为 `@Prop`（否则人数标题停留在首帧值）；
   - 口味星图按邻居坐标最大绝对值自适应缩放（真实数据量纲很小，原固定半径会把点全挤在圆心）。
 - 复验：登录「冬瓜」后进入同好页，正常渲染 30 位近邻，日志无 `TypeError`。
