@@ -40,6 +40,8 @@ export struct AmapView {
   @Prop @Watch('onCenterChanged') centerZoom: number = DEFAULT_ZOOM;
   /** 外部点「回到我的位置」时递增，触发一次重新居中 */
   @Prop @Watch('onRecenterTick') recenterTick: number = 0;
+  /** 前后台切换：后台停轮询并把地图挂起，回前台恢复，避免定时器堆叠卡死 */
+  @StorageProp('appForeground') @Watch('onAppForeground') appForeground: boolean = true;
   /** 用户当前位置（0 表示尚未定位），用于画小圆点 */
   @Prop @Watch('onUserMoved') userLat: number = 0;
   @Prop @Watch('onUserMoved') userLng: number = 0;
@@ -150,7 +152,33 @@ export struct AmapView {
     this.moveTo(this.centerLat, this.centerLng, this.centerZoom);
   }
 
-  /** 右上角「定位」按钮触发：回到当前中心（定位点） */
+  onAppForeground(): void {
+    if (this.appForeground) {
+      if (this.mapView !== null) {
+        try {
+          this.mapView.onResume();
+        } catch (err) {
+          // 忽略
+        }
+      }
+      if (this.aMap !== null) {
+        this.syncMarkers();
+        this.syncUserMarker();
+        this.startPoll();
+      }
+    } else {
+      this.stopPoll();
+      if (this.mapView !== null) {
+        try {
+          this.mapView.onPause();
+        } catch (err) {
+          // 忽略
+        }
+      }
+    }
+  }
+
+  /** 定位按钮触发：回到当前中心（定位点） */
   onRecenterTick(): void {
     this.recenter();
   }

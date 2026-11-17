@@ -88,6 +88,8 @@ export struct MapTab {  @State places: Place[] = [];
   private loadSeq: number = 0;
   /** 是否横屏（平板 / 折叠屏展开）：横屏时搜索结果用横向连续滑动 */
   @State isWide: boolean = false;
+  /** 前后台切换：后台停掉定时器，回前台重启，避免回调堆叠 */
+  @StorageProp('appForeground') @Watch('onAppActive') appActive: boolean = true;
   /** 顶栏「定位」按钮通过 AppStorage 通知地图重新居中 */
   @StorageProp('recenterTick') @Watch('onGlobalRecenter') recenterTick: number = 0;
   private orientCb: Callback<number> | null = null;
@@ -122,6 +124,28 @@ export struct MapTab {  @State places: Place[] = [];
       display.on('change', cb);
     } catch (err) {
       this.orientCb = null;
+    }
+  }
+
+  /** 前后台切换处理 */
+  onAppActive(): void {
+    if (this.appActive) {
+      if (this.recentTimer < 0) {
+        this.recentTimer = setInterval(() => {
+          this.pruneRecent();
+        }, 5000);
+      }
+      this.syncOrientation();
+      this.refreshCluster();
+    } else {
+      if (this.recentTimer >= 0) {
+        clearInterval(this.recentTimer);
+        this.recentTimer = -1;
+      }
+      if (this.searchTimer >= 0) {
+        clearTimeout(this.searchTimer);
+        this.searchTimer = -1;
+      }
     }
   }
 

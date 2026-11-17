@@ -88,9 +88,17 @@ export default class EntryAbility extends UIAbility {
 
   onForeground(): void {
     hilog.info(DOMAIN, 'testApp', '%{public}s', 'Ability onForeground');
+    // 通知页面恢复：地图 onResume + 重启轮询。只改一次值，避免重复触发
+    if (AppStorage.get<boolean>('appForeground') !== true) {
+      AppStorage.setOrCreate<boolean>('appForeground', true);
+    }
   }
 
   onBackground(): void {
     hilog.info(DOMAIN, 'testApp', '%{public}s', 'Ability onBackground');
+    // 通知页面暂停：停掉轮询与定时器，避免后台堆积回调把主线程堵死
+    if (AppStorage.get<boolean>('appForeground') !== false) {
+      AppStorage.setOrCreate<boolean>('appForeground', false);
+    }
   }
 }
