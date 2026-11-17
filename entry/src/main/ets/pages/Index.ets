@@ -7,7 +7,6 @@ import { Store } from '../common/Store';
 import { PoiCache } from '../common/PoiCache';
 import { AuthService, MiscService } from '../service/Services';
 import { MapTab } from '../view/MapTab';
-import { JourneyTab } from '../view/JourneyTab';
 import { FavoritesTab } from '../view/FavoritesTab';
 import { CommunityTab } from '../view/CommunityTab';
 import { ProfileTab } from '../view/ProfileTab';
@@ -299,20 +298,15 @@ struct Index {
         TabContent() {
           this.tabPage(1)
         }
-        .tabBar(this.tabBarItem(1, '行', '行程'))
+        .tabBar(this.tabBarItem(1, '收', '收藏'))
 
         TabContent() {
           this.tabPage(2)
         }
-        .tabBar(this.tabBarItem(2, '收', '收藏'))
+        .tabBar(this.tabBarItem(2, '邻', '同好'))
 
         TabContent() {
           this.tabPage(3)
-        }
-        .tabBar(this.tabBarItem(3, '邻', '同好'))
-
-        TabContent() {
-          this.tabPage(4)
         }
         .tabBar(this.profileTabBar())
       }
@@ -346,10 +340,8 @@ struct Index {
       if (idx === 0) {
         MapTab()
       } else if (idx === 1) {
-        JourneyTab()
-      } else if (idx === 2) {
         FavoritesTab()
-      } else if (idx === 3) {
+      } else if (idx === 2) {
         CommunityTab()
       } else {
         ProfileTab()
@@ -397,12 +389,12 @@ struct Index {
       } else {
         Text('我')
           .fontSize(16)
-          .fontWeight(this.currentTab === 4 ? FontWeight.Bold : FontWeight.Normal)
-          .fontColor(this.currentTab === 4 ? $r('app.color.primary') : $r('app.color.ink_faint'))
+          .fontWeight(this.currentTab === 3 ? FontWeight.Bold : FontWeight.Normal)
+          .fontColor(this.currentTab === 3 ? $r('app.color.primary') : $r('app.color.ink_faint'))
       }
       Text(this.loggedIn && this.userName.length > 0 ? this.userName : '我的')
         .fontSize(Theme.F_CAP)
-        .fontColor(this.currentTab === 4 ? $r('app.color.primary') : $r('app.color.ink_faint'))
+        .fontColor(this.currentTab === 3 ? $r('app.color.primary') : $r('app.color.ink_faint'))
         .margin({ top: 3 })
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -411,9 +403,9 @@ struct Index {
     .width('100%')
     .height('100%')
     .justifyContent(FlexAlign.Center)
-    .scale({ x: this.currentTab === 4 ? 1.06 : 0.96, y: this.currentTab === 4 ? 1.06 : 0.96 })
-    .translate({ y: this.currentTab === 4 ? -2 : 0 })
-    .opacity(this.currentTab === 4 ? 1 : 0.82)
+    .scale({ x: this.currentTab === 3 ? 1.06 : 0.96, y: this.currentTab === 3 ? 1.06 : 0.96 })
+    .translate({ y: this.currentTab === 3 ? -2 : 0 })
+    .opacity(this.currentTab === 3 ? 1 : 0.82)
     .animation({ duration: 320, curve: curves.springMotion() })
   }
 }
