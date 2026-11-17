@@ -288,7 +288,7 @@ export struct AmapView {
 
   /** 原项目 IC()：数量字号随位数与缩放变化 */
   private countFontSize(text: string, scale: number): number {
-    const base = text.length <= 2 ? 20 : (text.length === 3 ? 16 : 13);
+    const base = text.length <= 2 ? 18 : (text.length === 3 ? 14 : 11);
     return Math.round(base * scale * 10) / 10;
   }
 

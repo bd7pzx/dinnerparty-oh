@@ -21,6 +21,14 @@ const COUNT_Y: number = 0.36;
 const INK_R: number = 43;
 const INK_G: number = 36;
 const INK_B: number = 64;
+/** 水滴底色：半透明白（能透出底图），描边取原图的粉色 */
+const FILL_ALPHA: number = 232;
+const FILL_R: number = 252;
+const FILL_G: number = 248;
+const FILL_B: number = 253;
+const EDGE_R: number = 255;
+const EDGE_G: number = 176;
+const EDGE_B: number = 208;
 
 export class MarkerIcon {
   private static base: image.PixelMap | null = null;
@@ -74,7 +82,8 @@ export class MarkerIcon {
         size: { width: w, height: h },
         srcPixelFormat: image.PixelMapFormat.RGBA_8888,
         pixelFormat: image.PixelMapFormat.RGBA_8888,
-        alphaType: image.AlphaType.UNPREMUL,
+        // 与源图保持一致的预乘 alpha，否则半透明区域混合后会变成实心
+        alphaType: image.AlphaType.PREMUL,
         editable: true
       });
     } catch (err) {
@@ -112,17 +121,28 @@ export class MarkerIcon {
     return MarkerIcon.scaleTo(img, w, h, size.width, size.height);
   }
 
+  /** 水滴外形：上圆 + 下尖，用矢量画出来才能保证底色是真半透明 */
+  private static dropPath(w: number, h: number): drawing.Path {
+    const path = new drawing.Path();
+    const cx = w * 0.5;
+    const cy = h * 0.365;
+    const r = w * 0.415;
+    path.addCircle(cx, cy, r);
+    path.moveTo(cx, h * 0.96);
+    path.lineTo(cx - r * 0.66, cy + r * 0.62);
+    path.lineTo(cx + r * 0.66, cy + r * 0.62);
+    path.close();
+    return path;
+  }
+
   /**
-   * 生成聚合图标：水滴底图按 scale 缩放，数字居中绘制。
+   * 生成聚合图标：矢量水滴（半透明白底 + 粉色描边）+ 数量数字。
+   * 不再叠 PNG——位图经过 PixelMap 合成后 alpha 会被吃掉，显示成实心块。
    * @param scale 聚合缩放（1.0 ~ 1.3）
    * @param text 已格式化的数量文本（如 12 / 1.2k）
    * @param fontVp 字号（vp），会乘 density 换成像素
    */
   static cluster(scale: number, text: string, fontVp: number): image.PixelMap | undefined {
-    const base = MarkerIcon.base;
-    if (base === null) {
-      return undefined;
-    }
     const s = scale <= 0 ? 1 : scale;
     const w = Math.max(1, Math.round(BASE_W * s));
     const h = Math.max(1, Math.round(BASE_H * s));
@@ -132,27 +152,52 @@ export class MarkerIcon {
         return undefined;
       }
       const canvas = new drawing.Canvas(pm);
-      // 底图按 scale 铺满
-      canvas.save();
-      canvas.scale(w / BASE_W, h / BASE_H);
-      canvas.drawImage(base, 0, 0);
-      canvas.restore();
+      const path = MarkerIcon.dropPath(w, h);
 
-      const fontPx = Math.max(8, Math.round(MarkerIcon.vp2px(fontVp) * s));
-      const font = new drawing.Font();
+      // 半透明白底
+      const fill = new drawing.Brush();
+      const fillColor: common2D.Color = {
+        alpha: FILL_ALPHA, red: FILL_R, green: FILL_G, blue: FILL_B
+      };
+      fill.setColor(fillColor);
+      canvas.attachBrush(fill);
+      canvas.drawPath(path);
+      canvas.detachBrush();
+
+      // 粉色描边
+      const pen = new drawing.Pen();
+      const edgeColor: common2D.Color = {
+        alpha: 255, red: EDGE_R, green: EDGE_G, blue: EDGE_B
+      };
+      pen.setColor(edgeColor);
+      pen.setStrokeWidth(Math.max(2, w * 0.045));
+      canvas.attachPen(pen);
+      canvas.drawPath(path);
+      canvas.detachPen();
+
+      // 字号：按水滴可用宽度自适应，位数多就等比缩小，避免数字溢出边界
+      let fontPx = Math.max(8, Math.round(MarkerIcon.vp2px(fontVp) * s));
+      const maxTextW = w * 0.56;
+      let font = new drawing.Font();
       font.setSize(fontPx);
+      let tw = font.measureText(text, drawing.TextEncoding.TEXT_ENCODING_UTF8);
+      if (tw > maxTextW && tw > 0) {
+        fontPx = Math.max(8, Math.floor(fontPx * maxTextW / tw));
+        font = new drawing.Font();
+        font.setSize(fontPx);
+        tw = font.measureText(text, drawing.TextEncoding.TEXT_ENCODING_UTF8);
+      }
       const blob = drawing.TextBlob.makeFromString(text, font, drawing.TextEncoding.TEXT_ENCODING_UTF8);
-      const tw = font.measureText(text, drawing.TextEncoding.TEXT_ENCODING_UTF8);
       const cx = w * COUNT_X - tw / 2;
       // drawTextBlob 的 y 是基线，按字号上抬约 0.36 倍让视觉居中
       const cy = h * COUNT_Y + fontPx * 0.36;
       // 文字颜色由 canvas 的 brush 决定
-      const brush = new drawing.Brush();
-      const color: common2D.Color = {
+      const ink = new drawing.Brush();
+      const inkColor: common2D.Color = {
         alpha: 255, red: INK_R, green: INK_G, blue: INK_B
       };
-      brush.setColor(color);
-      canvas.attachBrush(brush);
+      ink.setColor(inkColor);
+      canvas.attachBrush(ink);
       canvas.drawTextBlob(blob, cx, cy);
       canvas.detachBrush();
       return pm;
