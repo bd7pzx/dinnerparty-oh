@@ -1,5 +1,6 @@
 /** 地图页：搜索、分类筛选、自绘地图、随机推荐、地点详情 */
-import { display } from '@kit.ArkUI';
+import { curves, display } from '@kit.ArkUI';
+import { motion } from '@kit.MultimodalAwarenessKit';
 import { Theme } from '../common/Theme';
 import { Store } from '../common/Store';
 import { LatLng, distanceMeters, formatCost, formatDistance, truncate } from '../common/Util';
@@ -10,8 +11,10 @@ import { MapCanvas } from './MapCanvas';
 import { AmapView } from './AmapView';
 import { PlaceDetail } from './PlaceDetail';
 import { getFix } from '../common/Location';
+import { ensureMotionPermission } from '../common/Permission';
 import { PoiCache } from '../common/PoiCache';
 import { common } from '@kit.AbilityKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { EmptyState, LoadingRow, PillTag, PrimaryButton, SectionCard } from './Widgets';
 
 /** 近期查看过的点位（20 秒内存缓存，滑回去不用重新请求） */
@@ -21,6 +24,8 @@ const TITLE_BAND: number = 46;
 const WIDE_CARD_W: number = 330;
 /** 悬浮导航高度（vp），与 Index 里 barHeight 保持一致 */
 const BAR_HEIGHT_VP: number = 60;
+/** 悬浮栏左右留白，定位按钮与之对齐 */
+const BAR_SIDE: number = 16;
 /** 地图浮层卡片统一高度：搜索结果卡与单个信息卡保持一致 */
 const CARD_H: number = 116;
 /** 右上角药丸行下移，避开顶部搜索/分类浮层 */
@@ -88,6 +93,11 @@ export struct MapTab {  @State places: Place[] = [];
   private loadSeq: number = 0;
   /** 是否横屏（平板 / 折叠屏展开）：横屏时搜索结果用横向连续滑动 */
   @State isWide: boolean = false;
+  /** 握持手：右手握持时按钮靠右，左手靠左 —— 智感握持 */
+  @State holdRight: boolean = true;
+  private holdCb: Callback<motion.HoldingHandStatus> | null = null;
+  /** holdingHandChanged 不可用时的退路：operatingHandStatus */
+  private opHandCb: Callback<motion.OperatingHandStatus> | null = null;
   /** 前后台切换：后台停掉定时器，回前台重启，避免回调堆叠 */
   @StorageProp('appForeground') @Watch('onAppActive') appActive: boolean = true;
   /** 顶栏「定位」按钮通过 AppStorage 通知地图重新居中 */
@@ -114,6 +124,8 @@ export struct MapTab {  @State places: Place[] = [];
     this.recentTimer = setInterval(() => {
       this.pruneRecent();
     }, 5000);
+    // 智感握持：按钮靠向握持手
+    this.watchHoldingHand();
     // 屏幕方向：横屏时搜索结果改成横向连续滑动
     this.syncOrientation();
     try {
@@ -124,6 +136,79 @@ export struct MapTab {  @State places: Place[] = [];
       display.on('change', cb);
     } catch (err) {
       this.orientCb = null;
+    }
+  }
+
+  /**
+   * 订阅智感握持：拿到握持手就调整按钮靠向。
+   * holdingHandChanged 要的是 ohos.permission.DETECT_GESTURE（system_grant，装机即授予），
+   * 之前只声明了 ACTIVITY_MOTION，订阅被 201 拒掉且异常被吞，所以一直没生效。
+   */
+  private watchHoldingHand(): void {
+    if (this.holdCb !== null || this.opHandCb !== null) {
+      return;
+    }
+    const cb = (status: motion.HoldingHandStatus): void => {
+      if (status === motion.HoldingHandStatus.LEFT_HAND_HELD) {
+        this.holdRight = false;
+      } else if (status === motion.HoldingHandStatus.RIGHT_HAND_HELD) {
+        this.holdRight = true;
+      }
+      // NOT_HELD / BOTH_HANDS_HELD 保持上次位置，避免按钮来回跳
+      console.info(`[MapTab] holdingHand=${status} holdRight=${this.holdRight}`);
+    };
+    try {
+      motion.on('holdingHandChanged', cb);
+      this.holdCb = cb;
+      console.info('[MapTab] holdingHandChanged subscribed');
+    } catch (err) {
+      const e = err as BusinessError;
+      console.info(`[MapTab] holdingHandChanged failed: code=${e.code}, message=${e.message}`);
+      this.fallbackOperatingHand();
+    }
+  }
+
+  /** 握持类事件不可用（能力缺失或权限）时退回操作手识别 */
+  private async fallbackOperatingHand(): Promise<void> {
+    const granted = await ensureMotionPermission();
+    console.info(`[MapTab] motion permission granted=${granted}`);
+    if (this.opHandCb !== null || this.holdCb !== null) {
+      return;
+    }
+    const cb = (status: motion.OperatingHandStatus): void => {
+      if (status === motion.OperatingHandStatus.LEFT_HAND_OPERATED) {
+        this.holdRight = false;
+      } else if (status === motion.OperatingHandStatus.RIGHT_HAND_OPERATED) {
+        this.holdRight = true;
+      }
+    };
+    try {
+      motion.on('operatingHandChanged', cb);
+      this.opHandCb = cb;
+      console.info('[MapTab] operatingHandChanged subscribed');
+    } catch (err) {
+      const e = err as BusinessError;
+      this.opHandCb = null;
+      console.info(`[MapTab] operatingHandChanged failed: code=${e.code}, message=${e.message}`);
+    }
+  }
+
+  private stopWatchHolding(): void {
+    if (this.holdCb !== null) {
+      try {
+        motion.off('holdingHandChanged', this.holdCb);
+      } catch (err) {
+        // 忽略：注销失败不影响退出
+      }
+      this.holdCb = null;
+    }
+    if (this.opHandCb !== null) {
+      try {
+        motion.off('operatingHandChanged', this.opHandCb);
+      } catch (err) {
+        // 忽略
+      }
+      this.opHandCb = null;
     }
   }
 
@@ -173,6 +258,7 @@ export struct MapTab {  @State places: Place[] = [];
   }
 
   aboutToDisappear(): void {
+    this.stopWatchHolding();
     if (this.recentTimer >= 0) {
       clearInterval(this.recentTimer);
       this.recentTimer = -1;
@@ -1272,6 +1358,26 @@ export struct MapTab {  @State places: Place[] = [];
       .justifyContent(FlexAlign.Start)
       .hitTestBehavior(HitTestMode.Transparent)
 
+      // ===== 定位按钮：底栏正上方，跟随握持手靠左 / 靠右 =====
+      Row() {
+        Text('◎')
+          .fontSize(20)
+          .fontColor($r('app.color.primary'))
+          .width(46)
+          .height(46)
+          .textAlign(TextAlign.Center)
+          .backgroundColor($r('app.color.surface'))
+          .borderRadius(Theme.R_FULL)
+          .shadow(Theme.cardShadow())
+          .onClick(() => {
+            this.recenterTick++;
+          })
+      }
+      .width('100%')
+      .padding({ left: BAR_SIDE, right: BAR_SIDE })
+      .justifyContent(this.holdRight ? FlexAlign.End : FlexAlign.Start)
+      .margin({ bottom: this.barClearance })
+      .animation({ duration: 260, curve: curves.springMotion() })
 
       // 聚合成员浮层
       if (this.clusterPanel !== null) {

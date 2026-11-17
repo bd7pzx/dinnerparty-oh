@@ -15,6 +15,10 @@
     {
       "name": "reason_location",
       "value": "用于判断你与店铺的距离，完成到店打卡"
+    },
+    {
+      "name": "reason_activity_motion",
+      "value": "用于识别当前握持手，让定位按钮自动靠向顺手的一侧"
     }
   ]
 }

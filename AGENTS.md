@@ -639,3 +639,46 @@ devecocli signature generate           # 生成调试签名
 浮层卡片额外留出 `barClearance = 60(导航高) + 12(距底) + 12(呼吸) + safeBottom` 的底部间距，
 避免被悬浮导航压住——之前只写了 `margin.bottom`，在 `Stack(Bottom)` 里不生效，改成外层容器 `padding.bottom`。
 
+### 7.6 智感握持（定位按钮跟随握持手）
+
+定位按钮浮在悬浮导航正上方，左手握持靠左、右手握持靠右。
+
+```ts
+import { motion } from '@kit.MultimodalAwarenessKit';
+
+motion.on('holdingHandChanged', (status: motion.HoldingHandStatus) => {
+  if (status === motion.HoldingHandStatus.LEFT_HAND_HELD) { holdRight = false; }
+  if (status === motion.HoldingHandStatus.RIGHT_HAND_HELD) { holdRight = true; }
+});
+```
+
+- `HoldingHandStatus`（API 20 起）：`NOT_HELD=0 / LEFT_HAND_HELD=1 / RIGHT_HAND_HELD=2 / BOTH_HANDS_HELD=3 / UNKNOWN_STATUS=16`；
+- 只有明确的左/右手事件才改位置，`NOT_HELD` / `BOTH_HANDS_HELD` 保持上次状态，避免按钮来回跳；
+- 按钮行用 `Row().justifyContent(holdRight ? FlexAlign.End : FlexAlign.Start)`，左右 `BAR_SIDE=16` 与悬浮栏对齐；
+- 按钮 46×46、`R_FULL` 圆角，与底栏胶囊的圆角、边距统一。
+
+> **坑：权限声明错了，事件永远不来。**
+> `holdingHandChanged` 标注的是 `@permission ohos.permission.DETECT_GESTURE`，
+> 而 `operatingHandChanged` 用的是 `ohos.permission.ACTIVITY_MOTION`。
+> 只声明 `ACTIVITY_MOTION` 时 `motion.on('holdingHandChanged')` 抛 **201 Permission denied**，
+> 旧代码用 `catch {}` 静默吞掉，表现为「代码写了但完全没反应」。
+>
+> 两者授权方式也不同：
+>
+> | 权限 | grantMode | 用法 |
+> |---|---|---|
+> | `ohos.permission.DETECT_GESTURE` | `system_grant` | 只需在 `module.json5` 声明，装机即授予，无需运行时申请 |
+> | `ohos.permission.ACTIVITY_MOTION` | `user_grant` | 仅 `operatingHandChanged` 用得上，需 `requestPermissionsFromUser` |
+>
+> 现在两个都声明：优先订阅 `holdingHandChanged`；抛 201/801 时退回 `operatingHandChanged`
+> （先经 `common/Permission.ets` 的 `ensureMotionPermission()` 申请 `ACTIVITY_MOTION`）。
+> 订阅结果与事件都打 `console.info`，`hilog` 里可直接看到
+> `[MapTab] holdingHandChanged subscribed` 与 `holdingHand=1/2`。
+>
+> 真机（Mate 70 Pro）实测日志：
+> ```
+> [MapTab] holdingHandChanged subscribed
+> [MapTab] holdingHand=1 holdRight=false
+> [MapTab] holdingHand=2 holdRight=true
+> ```
+

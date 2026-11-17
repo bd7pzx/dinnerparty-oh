@@ -56,6 +56,19 @@
     ],
     "requestPermissions": [
       {
+        "name": "ohos.permission.DETECT_GESTURE"
+      },
+      {
+        "name": "ohos.permission.ACTIVITY_MOTION",
+        "reason": "$string:reason_activity_motion",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      },
+      {
         "name": "ohos.permission.INTERNET"
       },
       {

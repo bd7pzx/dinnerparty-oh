@@ -300,19 +300,6 @@ struct Index {
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
 
-          // 定位按钮（原深色切换的位置）：通知地图回到我的位置
-          Text('◎')
-            .fontSize(16)
-            .fontColor($r('app.color.primary'))
-            .width(34)
-            .height(34)
-            .textAlign(TextAlign.Center)
-            .backgroundColor($r('app.color.tint'))
-            .borderRadius(17)
-            .onClick(() => {
-              const next = (AppStorage.get<number>('recenterTick') ?? 0) + 1;
-              AppStorage.setOrCreate<number>('recenterTick', next);
-            })
 
         }
         .width('100%')
