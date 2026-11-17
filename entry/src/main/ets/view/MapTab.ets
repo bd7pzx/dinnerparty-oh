@@ -14,6 +14,9 @@ import { common } from '@kit.AbilityKit';
 import { EmptyState, LoadingRow, PillTag, PrimaryButton, SectionCard } from './Widgets';
 
 /** 近期查看过的点位（20 秒内存缓存，滑回去不用重新请求） */
+/** 顶栏高度（不含安全区）：顶部浮层据此下移避开标题 */
+const TITLE_BAND: number = 46;
+
 interface RecentPoi {
   place: Place;
   ts: number;
@@ -827,89 +830,6 @@ export struct MapTab {  @State places: Place[] = [];
   build() {
     Stack({ alignContent: Alignment.Bottom }) {
       Column() {
-        // 搜索条
-        Row() {
-          Text('搜')
-            .fontSize(Theme.F_SM)
-            .fontColor($r('app.color.ink_faint'))
-            .margin({ right: 6 })
-          TextInput({ text: this.keyword, placeholder: '搜店名、分类，比如「肠粉」' })
-            .layoutWeight(1)
-            .height(38)
-            .fontSize(Theme.F_BASE)
-            .backgroundColor(Color.Transparent)
-            .onChange((v: string) => {
-              this.keyword = v;
-              // 输入防抖自动搜索：不用按回车也能出结果
-              if (this.searchTimer >= 0) {
-                clearTimeout(this.searchTimer);
-                this.searchTimer = -1;
-              }
-              const kw = v.trim();
-              if (kw.length === 0) {
-                this.searchResults = [];
-                this.searchIndex = 0;
-                return;
-              }
-              this.searchTimer = setTimeout(() => {
-                this.searchTimer = -1;
-                this.search();
-              }, 600);
-            })
-            .onSubmit(() => {
-              this.search();
-            })
-          Text('今天吃什么')
-            .fontSize(Theme.F_SM)
-            .fontColor($r('app.color.on_primary'))
-            .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-            .backgroundColor($r('app.color.primary'))
-            .borderRadius(Theme.R_FULL)
-            .onClick(() => this.drawOne())
-        }
-        .width('100%')
-        .padding({ left: 12, right: 8 })
-        .height(46)
-        .backgroundColor($r('app.color.surface'))
-        .borderRadius(Theme.R_FULL)
-        .shadow(Theme.cardShadow())
-
-        // 分类（横向滚动；点击依赖 PillTag 内部的 onClick + catStates 预计算）
-        Scroll() {
-          Row() {
-            Column() {
-              PillTag({
-                text: '全部',
-                state: this.activeCategory.length === 0 ? 1 : 0,
-                onTap: () => {
-                  this.activeCategory = '';
-                  this.categoryMode = 0;
-                  this.refreshCluster();
-                }
-              })
-            }
-            .margin({ right: 8 })
-
-            ForEach(this.categories, (c: Category, idx: number) => {
-              Column() {
-                PillTag({
-                  text: c.name,
-                  state: idx < this.catStates.length ? this.catStates[idx] : 0,
-                  onTap: () => {
-                    this.cycleCategory(c.name);
-                  }
-                })
-              }
-              .margin({ right: 8 })
-            }, (c: Category, idx: number) =>
-              `${c.id}-${idx < this.catStates.length ? this.catStates[idx] : 0}`)
-          }
-          .padding({ right: 12 })
-        }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .width('100%')
-        .margin({ top: Theme.S_SM })
 
         // 地图
         Stack({ alignContent: Alignment.TopEnd }) {
@@ -1121,17 +1041,123 @@ export struct MapTab {  @State places: Place[] = [];
           .height('100%')
           .hitTestBehavior(HitTestMode.Transparent)
         }
-        .layoutWeight(1)
+        // 地图铺满整屏：去掉圆角与外边距，顶栏与底栏都是浮层
         .width('100%')
-        .borderRadius(Theme.R_LG)
-        .clip(true)
-        .margin({ top: Theme.S_SM })
+        .height('100%')
 
       }
       .width('100%')
       .height('100%')
-      .padding({ left: Theme.S_LG, right: Theme.S_LG, top: Theme.S_MD })
-      .clip(true)
+
+      // ===== 顶部浮层：搜索 + 分类（渐变渐隐，压在地图上也能读清） =====
+      // 外层撑满并顶部对齐：Stack 是 Bottom 对齐，不能直接放这里的子节点
+      Column() {
+        Column() {
+        // 搜索条
+        Row() {
+          Text('搜')
+            .fontSize(Theme.F_SM)
+            .fontColor($r('app.color.ink_faint'))
+            .margin({ right: 6 })
+          TextInput({ text: this.keyword, placeholder: '搜店名、分类，比如「肠粉」' })
+            .layoutWeight(1)
+            .height(38)
+            .fontSize(Theme.F_BASE)
+            .backgroundColor(Color.Transparent)
+            .onChange((v: string) => {
+              this.keyword = v;
+              // 输入防抖自动搜索：不用按回车也能出结果
+              if (this.searchTimer >= 0) {
+                clearTimeout(this.searchTimer);
+                this.searchTimer = -1;
+              }
+              const kw = v.trim();
+              if (kw.length === 0) {
+                this.searchResults = [];
+                this.searchIndex = 0;
+                return;
+              }
+              this.searchTimer = setTimeout(() => {
+                this.searchTimer = -1;
+                this.search();
+              }, 600);
+            })
+            .onSubmit(() => {
+              this.search();
+            })
+          Text('今天吃什么')
+            .fontSize(Theme.F_SM)
+            .fontColor($r('app.color.on_primary'))
+            .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+            .backgroundColor($r('app.color.primary'))
+            .borderRadius(Theme.R_FULL)
+            .onClick(() => this.drawOne())
+        }
+        .width('100%')
+        .padding({ left: 12, right: 8 })
+        .height(46)
+        .backgroundColor($r('app.color.surface'))
+        .borderRadius(Theme.R_FULL)
+        .shadow(Theme.cardShadow())
+
+        // 分类（横向滚动；点击依赖 PillTag 内部的 onClick + catStates 预计算）
+        Scroll() {
+          Row() {
+            Column() {
+              PillTag({
+                text: '全部',
+                state: this.activeCategory.length === 0 ? 1 : 0,
+                onTap: () => {
+                  this.activeCategory = '';
+                  this.categoryMode = 0;
+                  this.refreshCluster();
+                }
+              })
+            }
+            .margin({ right: 8 })
+
+            ForEach(this.categories, (c: Category, idx: number) => {
+              Column() {
+                PillTag({
+                  text: c.name,
+                  state: idx < this.catStates.length ? this.catStates[idx] : 0,
+                  onTap: () => {
+                    this.cycleCategory(c.name);
+                  }
+                })
+              }
+              .margin({ right: 8 })
+            }, (c: Category, idx: number) =>
+              `${c.id}-${idx < this.catStates.length ? this.catStates[idx] : 0}`)
+          }
+          .padding({ right: 12 })
+        }
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+        .width('100%')
+        .margin({ top: Theme.S_SM })
+        }
+        .width('100%')
+        .padding({
+          left: Theme.S_LG,
+          right: Theme.S_LG,
+          top: (AppStorage.get<number>('safeTopVp') ?? 0) + TITLE_BAND,
+          bottom: Theme.S_MD
+        })
+        .linearGradient({
+          angle: 180,
+          colors: [
+            [$r('app.color.bg'), 0],
+            [$r('app.color.bg'), 0.62],
+            [$r('app.color.bg_clear'), 1]
+          ]
+        })
+      }
+      .width('100%')
+      .height('100%')
+      .justifyContent(FlexAlign.Start)
+      .hitTestBehavior(HitTestMode.Transparent)
+
 
       // 聚合成员浮层
       if (this.clusterPanel !== null) {

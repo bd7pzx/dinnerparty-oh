@@ -238,57 +238,8 @@ struct Index {
 
   @Builder
   shell() {
-    Column() {
-      // 顶栏：让开状态栏
-      Row() {
-        Column() {
-          Text('东方饭联地图')
-            .fontSize(Theme.F_LG)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.ink'))
-          Text(Store.isLoggedIn()
-            ? `已登录 · ${Store.nickname.length > 0 ? Store.nickname : Store.username}`
-            : '游客模式 · 未登录')
-            .fontSize(Theme.F_CAP)
-            .fontColor($r('app.color.ink_faint'))
-            .margin({ top: 2 })
-        }
-        .alignItems(HorizontalAlign.Start)
-        .layoutWeight(1)
-
-        Text(this.dark ? '☾' : '☀')
-          .fontSize(Theme.F_MD)
-          .fontColor($r('app.color.primary'))
-          .width(34)
-          .height(34)
-          .textAlign(TextAlign.Center)
-          .backgroundColor($r('app.color.tint'))
-          .borderRadius(17)
-          .onClick(() => {
-            this.switchTheme();
-          })
-      }
-      .width('100%')
-      .padding({
-        left: Theme.S_LG,
-        right: Theme.S_LG,
-        top: this.safeTop + Theme.S_SM,
-        bottom: Theme.S_SM
-      })
-
-      if (this.showNotice && this.noticeText.length > 0) {
-        Column() {
-          NoticeBar({
-            text: this.noticeText,
-            onClose: () => {
-              this.showNotice = false;
-            }
-          })
-        }
-        .padding({ left: Theme.S_LG, right: Theme.S_LG, bottom: Theme.S_SM })
-      }
-
-      // 悬浮导航 + 沉浸光感（HdsTabs barFloatingStyle + systemMaterialEffect）
+    // 地图铺满整屏，顶栏与悬浮导航都浮在上面，所以用 Stack 而不是 Column
+    Stack({ alignContent: Alignment.TopStart }) {
       HdsTabs({ controller: this.tabsController, index: this.currentTab }) {
         TabContent() {
           this.tabPage(0)
@@ -326,14 +277,75 @@ struct Index {
       .onChange((index: number) => {
         this.currentTab = index;
       })
-      .layoutWeight(1)
       .width('100%')
+      .height('100%')
+
+      // 顶栏浮层：底部渐隐，让文字压在地图上也能读清
+      Column() {
+        Row() {
+          Column() {
+            Text('东方饭联地图')
+              .fontSize(Theme.F_LG)
+              .fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.ink'))
+            Text(Store.isLoggedIn()
+              ? `已登录 · ${Store.nickname.length > 0 ? Store.nickname : Store.username}`
+              : '游客模式 · 未登录')
+              .fontSize(Theme.F_CAP)
+              .fontColor($r('app.color.ink_faint'))
+              .margin({ top: 2 })
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+
+          Text(this.dark ? '☾' : '☀')
+            .fontSize(Theme.F_MD)
+            .fontColor($r('app.color.primary'))
+            .width(34)
+            .height(34)
+            .textAlign(TextAlign.Center)
+            .backgroundColor($r('app.color.tint'))
+            .borderRadius(17)
+            .onClick(() => {
+              this.switchTheme();
+            })
+        }
+        .width('100%')
+        .padding({
+          left: Theme.S_LG,
+          right: Theme.S_LG,
+          top: this.safeTop + Theme.S_SM,
+          bottom: Theme.S_SM
+        })
+
+        if (this.showNotice && this.noticeText.length > 0) {
+          Column() {
+            NoticeBar({
+              text: this.noticeText,
+              onClose: () => {
+                this.showNotice = false;
+              }
+            })
+          }
+          .padding({ left: Theme.S_LG, right: Theme.S_LG, bottom: Theme.S_SM })
+        }
+      }
+      .width('100%')
+      .linearGradient({
+        angle: 180,
+        colors: [
+          [$r('app.color.bg'), 0],
+          [$r('app.color.bg'), 0.68],
+          [$r('app.color.bg_clear'), 1]
+        ]
+      })
+      .hitTestBehavior(HitTestMode.Transparent)
     }
     .width('100%')
     .height('100%')
   }
 
-  /** 页内容：底部为悬浮栏预留空间，避免被遮挡 */
+  /** 页内容：地图页铺满整屏，其余页让开顶部浮层并给悬浮栏留空间 */
   @Builder
   tabPage(idx: number) {
     Column() {
@@ -349,7 +361,11 @@ struct Index {
     }
     .width('100%')
     .height('100%')
-    .padding({ bottom: CONTENT_BOTTOM + this.safeBottom })
+    .padding({
+      // 顶栏现在是浮层，非地图页要让开它
+      top: idx === 0 ? 0 : this.safeTop + 52,
+      bottom: idx === 0 ? 0 : CONTENT_BOTTOM + this.safeBottom
+    })
   }
 
   /** 普通页签：选中放大上移 + 弹簧曲线（官方示例做法） */

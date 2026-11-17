@@ -16,6 +16,10 @@
     { "name": "warn", "value": "#D9A055" },
     { "name": "danger", "value": "#DE6A66" },
     { "name": "glass", "value": "#E61A1014" },
-    { "name": "glass_border", "value": "#1FF6E8ED" }
+    { "name": "glass_border", "value": "#1FF6E8ED" },
+    { "name": "surface_clear", "value": "#00241519" },
+    { "name": "bg_clear", "value": "#00120C0F" }
   ]
 }
+
+
