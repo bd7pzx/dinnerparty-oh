@@ -371,17 +371,15 @@ export struct MapTab {  @State places: Place[] = [];
     }
   }
   private async loadRegion(minLng: number, minLat: number, maxLng: number, maxLat: number): Promise<void> {
-    if (this.loading) {
-      return;
-    }
     // 20 秒内拉过这一带：直接用本地数据渲染，不发请求
     if (this.recentlyFetched(minLng, minLat, maxLng, maxLat)) {
       this.rebuildPlacesFromRecent();
       this.tip = '';
       return;
     }
-    // 缩到省/国尺度时 bbox 太大：请求会拖回海量数据把主线程压死。
-    // 这个尺度只用本地缓存 + 近期点位渲染，放大到城市级后再按需拉取。
+    // 缩到省/国尺度时 bbox 太大：一次请求会拖回海量数据把主线程压死，
+    // 改为切成小块顺序补齐。注意这里不能被 loading 挡住，
+    // 否则从街区缩到省级时，上一个请求还没回来就整段跳过，屏幕上会一片空白。
     if ((maxLng - minLng) > 2.5 || (maxLat - minLat) > 2.5) {
       const local: Place[] = [];
       const seenIds = new Set<number>();
@@ -405,8 +403,11 @@ export struct MapTab {  @State places: Place[] = [];
         this.refreshCluster();
       }
       this.tip = '省/国尺度，分块加载中…';
-      // 大尺度一次拉不完，切成小块顺序补齐，边补边显示
+      // 大尺度一次拉不完，切成小块顺序补
       this.loadBigRegion(minLng, minLat, maxLng, maxLat);
+      return;
+    }
+    if (this.loading) {
       return;
     }
     this.loading = true;
