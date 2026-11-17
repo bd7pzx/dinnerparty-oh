@@ -366,6 +366,18 @@ fy = 44                      // 最小点击区
 
 > 顺带把地图右上角「高德地图 / 街区 / N 家」三个药丸的 `cardShadow()` 去掉了，只保留底色圆角。
 
+### 6.13 近期点位 20 秒缓存
+
+解决「滑走再滑回来要重新请求/重新加载」：
+
+- `recent: Map<id, {place, ts}>` 记住看过的点位，`fetchedRegions` 记录最近拉取过的 bbox 与时间；
+- `loadRegion()` 开头先判断目标视野是否被 **20 秒内**拉取过的范围覆盖，命中就
+  `rebuildPlacesFromRecent()` 直接渲染，**不发请求**；
+- 拉取成功后把实际预取 bbox（3× 视野）记入 `fetchedRegions`，并把结果并入 `recent`；
+- 合并渲染时线上结果优先，再补 `recent` 里未过期的点，保证滑回去时点位还在；
+- 每 5 秒 `pruneRecent()` 清理过期项（连同过期的 `fetchedRegions`），过期后自然回落到正常请求；
+- 上限：`recent` 最多 600 个点、`fetchedRegions` 最多 8 个范围，避免聚合器被喂太多点。
+
 ---
 
 ## 七、沉浸式 · 悬浮导航 · 深色模式

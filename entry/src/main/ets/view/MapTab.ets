@@ -13,9 +13,23 @@ import { PoiCache } from '../common/PoiCache';
 import { common } from '@kit.AbilityKit';
 import { EmptyState, LoadingRow, PillTag, PrimaryButton, SectionCard } from './Widgets';
 
+/** 近期查看过的点位（20 秒内存缓存，滑回去不用重新请求） */
+interface RecentPoi {
+  place: Place;
+  ts: number;
+}
+
+/** 最近拉取过的范围 */
+interface FetchedRegion {
+  minLng: number;
+  minLat: number;
+  maxLng: number;
+  maxLat: number;
+  ts: number;
+}
+
 @Component
-export struct MapTab {
-  @State places: Place[] = [];
+export struct MapTab {  @State places: Place[] = [];
   @State categories: Category[] = [];
   @State activeCategory: string = '';
   /** 分类筛选模式：0 无 / 1 只看 / 2 排除 */
@@ -50,6 +64,18 @@ export struct MapTab {
   private silentUntil: number = 0;
   /** 搜索输入防抖定时器 */
   private searchTimer: number = -1;
+  /**
+   * 近期点位缓存：滑走过的区域保留 20 秒，
+   * 20 秒内滑回去直接用本地数据渲染，不再请求服务端。
+   */
+  private recent: Map<number, RecentPoi> = new Map<number, RecentPoi>();
+  /** 最近拉取过的范围（西南→东北 + 时间戳），用于判断能否跳过请求 */
+  private fetchedRegions: FetchedRegion[] = [];
+  private recentTimer: number = -1;
+  /** 近期点位保留时长 */
+  private readonly RECENT_TTL: number = 20000;
+  /** 近期点位最多保留多少个（避免聚合器被喂太多点） */
+  private readonly RECENT_MAX: number = 600;
   @State locating: boolean = false;
   /** 当前缩放与聚合结果 */
   @State zoom: number = 15;
@@ -65,6 +91,105 @@ export struct MapTab {
 
   aboutToAppear(): void {
     this.boot();
+    // 每 5 秒清一次过期的近期点位
+    this.recentTimer = setInterval(() => {
+      this.pruneRecent();
+    }, 5000);
+  }
+
+  aboutToDisappear(): void {
+    if (this.recentTimer >= 0) {
+      clearInterval(this.recentTimer);
+      this.recentTimer = -1;
+    }
+    if (this.searchTimer >= 0) {
+      clearTimeout(this.searchTimer);
+      this.searchTimer = -1;
+    }
+  }
+
+  /** 清理超过 20 秒的近期点位，若有变化就重绘 */
+  private pruneRecent(): void {
+    const now = Date.now();
+    let changed = false;
+    const drop: number[] = [];
+    this.recent.forEach((it: RecentPoi, id: number) => {
+      if (now - it.ts > this.RECENT_TTL) {
+        drop.push(id);
+      }
+    });
+    for (const id of drop) {
+      this.recent.delete(id);
+      changed = true;
+    }
+    // 已拉取范围也过期了
+    const keepRegions: FetchedRegion[] = [];
+    for (const r of this.fetchedRegions) {
+      if (now - r.ts <= this.RECENT_TTL) {
+        keepRegions.push(r);
+      }
+    }
+    if (keepRegions.length !== this.fetchedRegions.length) {
+      this.fetchedRegions = keepRegions;
+    }
+    if (changed) {
+      this.rebuildPlacesFromRecent();
+    }
+  }
+
+  /** 用近期点位重建 places（保留当前筛选） */
+  private rebuildPlacesFromRecent(): void {
+    const now = Date.now();
+    const out: Place[] = [];
+    this.recent.forEach((it: RecentPoi) => {
+      if (now - it.ts <= this.RECENT_TTL) {
+        out.push(it.place);
+      }
+    });
+    this.places = out;
+    this.refreshCluster();
+  }
+
+  /** 目标视野是否已被 20 秒内拉取过的范围覆盖 */
+  private recentlyFetched(minLng: number, minLat: number, maxLng: number, maxLat: number): boolean {
+    const now = Date.now();
+    for (const r of this.fetchedRegions) {
+      if (now - r.ts > this.RECENT_TTL) {
+        continue;
+      }
+      if (minLng >= r.minLng && minLat >= r.minLat && maxLng <= r.maxLng && maxLat <= r.maxLat) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** 记下已拉取范围并写入近期点位 */
+  private rememberFetched(minLng: number, minLat: number, maxLng: number, maxLat: number,
+    list: Place[]): void {
+    const now = Date.now();
+    this.fetchedRegions.push({
+      minLng: minLng, minLat: minLat, maxLng: maxLng, maxLat: maxLat, ts: now
+    });
+    // 只留最近 8 个范围，避免无限增长
+    if (this.fetchedRegions.length > 8) {
+      this.fetchedRegions = this.fetchedRegions.slice(this.fetchedRegions.length - 8);
+    }
+    for (const p of list) {
+      this.recent.set(p.id, { place: p, ts: now });
+    }
+    // 超过上限时丢弃最早的
+    if (this.recent.size > this.RECENT_MAX) {
+      const entries: RecentPoi[] = [];
+      this.recent.forEach((it: RecentPoi) => {
+        entries.push(it);
+      });
+      entries.sort((a: RecentPoi, b: RecentPoi) => a.ts - b.ts);
+      const dropCount = this.recent.size - this.RECENT_MAX;
+      for (let i = 0; i < dropCount; i++) {
+        this.recent.delete(entries[i].place.id);
+      }
+    }
   }
 
   /**
@@ -203,6 +328,12 @@ export struct MapTab {
     if (this.loading) {
       return;
     }
+    // 20 秒内拉过这一带：直接用本地数据渲染，不发请求
+    if (this.recentlyFetched(minLng, minLat, maxLng, maxLat)) {
+      this.rebuildPlacesFromRecent();
+      this.tip = '';
+      return;
+    }
     this.loading = true;
     const cx = (minLng + maxLng) / 2;
     const cy = (minLat + maxLat) / 2;
@@ -214,13 +345,22 @@ export struct MapTab {
     );
     this.loading = false;
     if (r.ok && r.data !== null) {
-      // 合并：线上结果优先，缓存里这次没返回的点补上（去重，不会重复显示）
+      // 记下这次拉取的范围与实际预取 bbox，20 秒内再回到这里就不重复请求
+      this.rememberFetched(cx - halfLng, cy - halfLat, cx + halfLng, cy + halfLat, r.data);
+      // 合并：线上结果优先，再补上「20 秒内查看过」和本地缓存里这次没返回的点
       const merged: Place[] = [];
       const seen = new Set<number>();
       for (const p of r.data) {
         merged.push(p);
         seen.add(p.id);
       }
+      const now = Date.now();
+      this.recent.forEach((it: RecentPoi) => {
+        if (now - it.ts <= this.RECENT_TTL && !seen.has(it.place.id)) {
+          merged.push(it.place);
+          seen.add(it.place.id);
+        }
+      });
       if (PoiCache.isEnabled()) {
         for (const c of this.cacheNear(cx, cy, Math.max(halfLng, halfLat) + 0.05)) {
           if (!seen.has(c.id)) {
