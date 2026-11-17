@@ -3,7 +3,7 @@ import { Theme } from '../common/Theme';
 import { Store } from '../common/Store';
 import { LatLng, distanceMeters, formatCost, formatDistance, truncate } from '../common/Util';
 import { Place, Category, RandomContainer, addressOf, splitCategory } from '../model/Types';
-import { ClusterPoint, Supercluster, scaleLabel, scaleOf } from '../common/Cluster';
+import { ClusterPoint, clusterSingle, scaleLabel, scaleOf } from '../common/Cluster';
 import { CommunityService, DrawResult, MiscService, PlaceService } from '../service/Services';
 import { MapCanvas } from './MapCanvas';
 import { AmapView } from './AmapView';
@@ -86,10 +86,6 @@ export struct MapTab {  @State places: Place[] = [];
   @State clusterPanel: ClusterPoint | null = null;
   /** 当前视野 bbox（西南 → 东北），聚合查询用 */
   private lastBounds: number[] = [113.22, 23.10, 113.29, 23.14];
-  /** supercluster 实例：radius 68 / extent 512 / minPoints 2 / maxZoom 16（同原项目） */
-  private clusterer: Supercluster = new Supercluster(68, 512, 2, 16);
-  /** 已载入数据的签名，只有地点集合变化时才重新聚类 */
-  private loadedSig: string = '';
 
   aboutToAppear(): void {
     this.boot();
@@ -413,8 +409,8 @@ export struct MapTab {  @State places: Place[] = [];
     this.loading = true;
     const cx = (minLng + maxLng) / 2;
     const cy = (minLat + maxLat) / 2;
-    const halfLng = (maxLng - minLng) * 1.5;
-    const halfLat = (maxLat - minLat) * 1.5;
+    const halfLng = (maxLng - minLng) * 1.0;
+    const halfLat = (maxLat - minLat) * 1.0;
     const r = await PlaceService.nearby(
       cx - halfLng, cy - halfLat, cx + halfLng, cy + halfLat,
       minLng, minLat, maxLng, maxLat
@@ -468,8 +464,8 @@ export struct MapTab {  @State places: Place[] = [];
 
   /**
    * 重算聚合。
-   * 关键：只把「当前视野 + 缓冲」内的点喂给 clusterer。
-   * places 里可能累积了上千个点（缓存 + 20 秒近期），全量喂进去是 O(n²) 扫描，会直接卡死。
+   * 只把「当前视野 + 缓冲」内的点拿去聚类，且只算当前 zoom 这一层（clusterSingle），
+   * 不再像 supercluster 那样预计算 17 层——那是 17 倍的冗余计算和内存。
    */
   private refreshCluster(): void {
     const b = this.lastBounds;
@@ -504,15 +500,17 @@ export struct MapTab {  @State places: Place[] = [];
       list.push(p);
     }
 
-    let sig = '';
-    for (const p of list) {
-      sig += `${p.id}_`;
+    // 单层聚类：只算当前 zoom 这一层，不再预计算 17 层
+    this.clusters = clusterSingle(list, this.zoom, 68, 512, 2, true);
+
+    // 只保留落在真实视野内的节点（clusterSingle 不按 bbox 过滤）
+    const visible: ClusterPoint[] = [];
+    for (const c of this.clusters) {
+      if (c.lng >= b[0] && c.lng <= b[2] && c.lat >= b[1] && c.lat <= b[3]) {
+        visible.push(c);
+      }
     }
-    if (sig !== this.loadedSig) {
-      this.loadedSig = sig;
-      this.clusterer.load(list);
-    }
-    this.clusters = this.clusterer.query(b[0], b[1], b[2], b[3], this.zoom);
+    this.clusters = visible;
 
     // 右上角显示「视野内的店铺数」＝各聚合节点 count 之和（不是节点个数）
     let total = 0;
@@ -584,10 +582,10 @@ export struct MapTab {  @State places: Place[] = [];
     this.silentUntil = Date.now() + 1600;
   }
 
-  /** 找出该地点从聚合里脱开、能单独显示的最近 zoom（supercluster 的 maxZoom+1 层必为原始点） */
+  /** 找出该地点从聚合里脱开、能单独显示的最近 zoom */
   private targetZoomFor(placeId: number): number {
     for (let z = 13; z <= 17; z++) {
-      const list = this.clusterer.query(-180, -85, 180, 85, z);
+      const list = clusterSingle(this.places, z, 68, 512, 2, false);
       for (const c of list) {
         if (c.count === 1 && c.placeId === placeId) {
           return z;

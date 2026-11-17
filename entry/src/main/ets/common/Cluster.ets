@@ -94,6 +94,123 @@ export function scaleLabel(scale: ClusterScale): string {
 }
 
 /** supercluster 移植版 */
+/**
+ * 单层聚类：只算当前 zoom 这一层，替代 supercluster 的「预计算 17 层」。
+ *
+ * 与其从 maxZoom 逐层递推到 minZoom（17 层 × O(n·k)），
+ * 这里直接按当前 zoom 的半径做一次网格合并，复杂度 O(n·k)。
+ * 聚合语义仍是「半径 r 内合并 + 数量加权求中心」，与原实现视觉一致，
+ * 但省掉 16 层多余计算和 16 份常驻内存。
+ */
+export function clusterSingle(source: Place[], zoom: number, radius: number, extent: number,
+  minPoints: number, clustersOnly: boolean): ClusterPoint[] {
+  const n = source.length;
+  if (n === 0) {
+    return [];
+  }
+  const z = zoom < 0 ? 0 : zoom;
+  const r = radius / (extent * Math.pow(2, z));
+  const rr = r * r;
+  const scale = scaleOf(z);
+
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (const p of source) {
+    xs.push(lngX(p.longitude));
+    ys.push(latY(p.latitude));
+  }
+
+  // 网格索引：cell 边长 = r
+  const grid = new Map<string, number[]>();
+  for (let i = 0; i < n; i++) {
+    const key = `${Math.floor(xs[i] / r)}_${Math.floor(ys[i] / r)}`;
+    const arr = grid.get(key);
+    if (arr === undefined) {
+      grid.set(key, [i]);
+    } else {
+      arr.push(i);
+    }
+  }
+
+  const used: boolean[] = new Array<boolean>(n);
+  for (let i = 0; i < n; i++) {
+    used[i] = false;
+  }
+
+  const out: ClusterPoint[] = [];
+  for (let i = 0; i < n; i++) {
+    if (used[i]) {
+      continue;
+    }
+    used[i] = true;
+    const cx = Math.floor(xs[i] / r);
+    const cy = Math.floor(ys[i] / r);
+    const members: number[] = [i];
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const arr = grid.get(`${cx + dx}_${cy + dy}`);
+        if (arr === undefined) {
+          continue;
+        }
+        for (const j of arr) {
+          if (j === i || used[j]) {
+            continue;
+          }
+          const ddx = xs[j] - xs[i];
+          const ddy = ys[j] - ys[i];
+          if (ddx * ddx + ddy * ddy <= rr) {
+            used[j] = true;
+            members.push(j);
+          }
+        }
+      }
+    }
+
+    if (members.length >= minPoints && !(clustersOnly && members.length < minPoints)) {
+      // 聚合点：数量加权求中心
+      let wx = 0;
+      let wy = 0;
+      const places: Place[] = [];
+      for (const j of members) {
+        wx += xs[j];
+        wy += ys[j];
+        places.push(source[j]);
+      }
+      const c = members.length;
+      out.push({
+        key: `c_${c}_${xLng(wx / c).toFixed(6)}_${yLat(wy / c).toFixed(6)}`,
+        lng: xLng(wx / c),
+        lat: yLat(wy / c),
+        count: c,
+        name: '',
+        scale: scale,
+        placeId: -1,
+        places: places,
+        nodeId: c,
+        originZoom: z
+      });
+    } else {
+      // 单点（或被排除的孤立点）
+      for (const j of members) {
+        const p = source[j];
+        out.push({
+          key: `p_${p.id}`,
+          lng: p.longitude,
+          lat: p.latitude,
+          count: 1,
+          name: p.name,
+          scale: ClusterScale.NONE,
+          placeId: p.id,
+          places: [p],
+          nodeId: -1,
+          originZoom: z
+        });
+      }
+    }
+  }
+  return out;
+}
+
 export class Supercluster {
   private radius: number;
   private extent: number;
