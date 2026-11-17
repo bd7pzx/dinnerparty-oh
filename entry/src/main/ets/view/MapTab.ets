@@ -383,9 +383,43 @@ export struct MapTab {  @State places: Place[] = [];
     }
   }
 
-  /** 重算聚合：聚类只在地点集合变化时做，缩放/平移只重新查询 */
+  /**
+   * 重算聚合。
+   * 关键：只把「当前视野 + 缓冲」内的点喂给 clusterer。
+   * places 里可能累积了上千个点（缓存 + 20 秒近期），全量喂进去是 O(n²) 扫描，会直接卡死。
+   */
   private refreshCluster(): void {
-    const list = this.filtered();
+    const b = this.lastBounds;
+    const padLng = Math.max((b[2] - b[0]) * 0.6, 0.01);
+    const padLat = Math.max((b[3] - b[1]) * 0.6, 0.01);
+    const minLng = b[0] - padLng;
+    const maxLng = b[2] + padLng;
+    const minLat = b[1] - padLat;
+    const maxLat = b[3] + padLat;
+
+    const list: Place[] = [];
+    const hasFilter = this.activeCategory.length > 0 && this.categoryMode !== 0;
+    for (const p of this.places) {
+      if (p.longitude < minLng || p.longitude > maxLng ||
+        p.latitude < minLat || p.latitude > maxLat) {
+        continue;
+      }
+      if (hasFilter) {
+        const parts = splitCategory(p.category);
+        let hit = false;
+        for (const s of parts) {
+          if (s === this.activeCategory) {
+            hit = true;
+            break;
+          }
+        }
+        if (this.categoryMode === 1 ? !hit : hit) {
+          continue;
+        }
+      }
+      list.push(p);
+    }
+
     let sig = '';
     for (const p of list) {
       sig += `${p.id}_`;
@@ -394,12 +428,14 @@ export struct MapTab {  @State places: Place[] = [];
       this.loadedSig = sig;
       this.clusterer.load(list);
     }
-    const b = this.lastBounds;
     this.clusters = this.clusterer.query(b[0], b[1], b[2], b[3], this.zoom);
 
-    // 预计算展示状态：方法内读 @State 不会被 ArkUI 追踪，必须落到状态变量上
-    // 右上角显示的是「当前地图上显示多少 pin」，所以用视野内的聚合节点数
-    this.shownCount = this.clusters.length;
+    // 右上角显示「视野内的店铺数」＝各聚合节点 count 之和（不是节点个数）
+    let total = 0;
+    for (const c of this.clusters) {
+      total += c.count;
+    }
+    this.shownCount = total;
     const st: number[] = [];
     for (const c of this.categories) {
       st.push(this.activeCategory === c.name ? this.categoryMode : 0);

@@ -379,8 +379,15 @@ fy = 44                      // 最小点击区
 - 每 5 秒 `pruneRecent()` **只清理 `recent` / `fetchedRegions`，不重绘 places**——
   过期只意味着下次移动视野会重新请求，当前屏幕上的 pin 保持不动；
 - 上限：`recent` 最多 600 个点、`fetchedRegions` 最多 8 个范围，避免聚合器被喂太多点。
-- 右上角「N 家」用 `shownCount = clusters.length`，即**当前地图视野内实际显示的 pin 数**，
-  不是缓存条数也不是筛选后的总条数。
+- **右上角「N 家」＝视野内店铺数**：`shownCount = Σ clusters[i].count`。
+  不是节点个数（那样聚合点只算 1）、也不是缓存条数。
+
+### 6.14 聚合性能：只喂视野内的点
+
+`refreshCluster()` 在把数据交给 supercluster 之前，先按 `lastBounds` 扩 0.6 倍缓冲做窗口裁剪，
+分类筛选也在这层做。原因：`places` 里会累积缓存点 + 20 秒近期点，可能上千条，
+而 `clusterer.load()` 是**线性扫描的 O(n²) 聚类**（17 层 × n²），全量喂进去会直接卡死。
+裁剪后通常只剩几十~几百条，聚类开销与视野规模挂钩而不是与缓存总量挂钩。
 
 ---
 
