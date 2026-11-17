@@ -66,17 +66,13 @@ export struct MapTab {
     this.boot();
   }
 
-  /** 先定位再按视野拉数据；无权限时用默认中心，并如实提示 */
+  /**
+   * 启动流程：先定位 → 用附近缓存铺地图 → 不发网络请求；
+   * 只有缓存为空（首次安装）时才立刻拉线上。用户移动视野后由 onRegion 触发拉取。
+   */
   private async boot(): Promise<void> {
-    // 缓存优先：先把上次访问过的点直接铺出来，避免白屏
     const ctx = getContext(this) as common.UIAbilityContext;
     await PoiCache.init(ctx);
-    let fromCache = false;
-    if (PoiCache.isEnabled() && PoiCache.count() > 0) {
-      this.places = PoiCache.toPlaces();
-      this.refreshCluster();
-      fromCache = true;
-    }
 
     this.locating = true;
     const fix = await getFix();
@@ -92,27 +88,95 @@ export struct MapTab {
       this.tip = fix.message;
     }
 
-    // 有缓存就先让缓存显示，稍后再拉线上，避免启动瞬间打请求
-    if (fromCache) {
-      setTimeout(() => {
-        this.loadRegion(
-          this.centerLng - 0.010, this.centerLat - 0.008,
-          this.centerLng + 0.010, this.centerLat + 0.008
-        );
-      }, 1200);
-    } else {
-      // 首屏：以中心点构造约 2km 视野，loadRegion 内部再按 3×3 预取
+    // 缓存优先：只取当前中心附近的点喂给聚合器（全量喂会拖垮 supercluster 的 O(n²) 扫描）
+    let fromCache = false;
+    if (PoiCache.isEnabled() && PoiCache.count() > 0) {
+      const near = this.cacheNear(this.centerLng, this.centerLat, 0.05);
+      if (near.length > 0) {
+        this.places = near;
+        this.refreshCluster();
+        fromCache = true;
+      }
+    }
+
+    if (!fromCache) {
       await this.loadRegion(
         this.centerLng - 0.010, this.centerLat - 0.008,
         this.centerLng + 0.010, this.centerLat + 0.008
       );
+    } else {
+      // 静默更新缓存：延迟 4s、只发一次请求，清掉服务端已不存在的点
+      this.scheduleCacheSync();
     }
+
     const c = await PlaceService.categories();
     if (c.ok && c.data !== null) {
       this.categories = c.data;
       // 分类到位后初始化各 tag 的显示态
       this.refreshCluster();
     }
+  }
+
+  /** 取缓存中落在某个中心附近（度）的点 */
+  private cacheNear(lng: number, lat: number, pad: number): Place[] {
+    const out: Place[] = [];
+    for (const it of PoiCache.all()) {
+      if (it.lng >= lng - pad && it.lng <= lng + pad &&
+        it.lat >= lat - pad && it.lat <= lat + pad) {
+        out.push({
+          id: it.id,
+          name: it.name,
+          category: it.category,
+          longitude: it.lng,
+          latitude: it.lat
+        });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 后台静默校验缓存：以缓存质心为中心取一小块范围拉一次线上数据，
+   * 把线上没有的缓存点删掉。只发一个请求、延迟执行，避免占用后台资源。
+   */
+  private scheduleCacheSync(): void {
+    if (!PoiCache.isEnabled() || PoiCache.count() === 0) {
+      return;
+    }
+    setTimeout(() => {
+      this.syncCacheSilently();
+    }, 4000);
+  }
+
+  private async syncCacheSilently(): Promise<void> {
+    const center = PoiCache.centroid();
+    if (center === null) {
+      return;
+    }
+    const pad = 0.12;
+    const r = await PlaceService.nearby(
+      center.lng - pad, center.lat - pad, center.lng + pad, center.lat + pad
+    );
+    if (!r.ok || r.data === null) {
+      return;
+    }
+    const alive = new Set<number>();
+    for (const p of r.data) {
+      alive.add(p.id);
+    }
+    // 只清理落在这次校验范围内的缓存点：范围内的且线上没有 → 判定为已删除
+    const stale: number[] = [];
+    for (const it of PoiCache.all()) {
+      const inRange = it.lng >= center.lng - pad && it.lng <= center.lng + pad &&
+        it.lat >= center.lat - pad && it.lat <= center.lat + pad;
+      if (inRange && !alive.has(it.id)) {
+        stale.push(it.id);
+      }
+    }
+    if (stale.length > 0) {
+      PoiCache.removeIds(stale);
+    }
+    PoiCache.put(r.data);
   }
 
   /**
@@ -134,7 +198,22 @@ export struct MapTab {
     );
     this.loading = false;
     if (r.ok && r.data !== null) {
-      this.places = r.data;
+      // 合并：线上结果优先，缓存里这次没返回的点补上（去重，不会重复显示）
+      const merged: Place[] = [];
+      const seen = new Set<number>();
+      for (const p of r.data) {
+        merged.push(p);
+        seen.add(p.id);
+      }
+      if (PoiCache.isEnabled()) {
+        for (const c of this.cacheNear(cx, cy, Math.max(halfLng, halfLat) + 0.05)) {
+          if (!seen.has(c.id)) {
+            merged.push(c);
+            seen.add(c.id);
+          }
+        }
+      }
+      this.places = merged;
       // 只缓存 id / 名称 / 分类 / 坐标，其它字段仍走线上
       PoiCache.put(r.data);
       this.refreshCluster();

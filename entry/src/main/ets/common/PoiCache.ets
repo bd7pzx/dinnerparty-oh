@@ -165,6 +165,53 @@ export class PoiCache {
     PoiCache.scheduleFlush();
   }
 
+  /** 删除一批失效点（服务端已不存在） */
+  static removeIds(ids: number[]): void {
+    if (ids.length === 0) {
+      return;
+    }
+    const drop = new Set<number>();
+    for (const id of ids) {
+      drop.add(id);
+    }
+    const kept: CachedPoi[] = [];
+    for (const it of PoiCache.items) {
+      if (!drop.has(it.id)) {
+        kept.push(it);
+      }
+    }
+    if (kept.length !== PoiCache.items.length) {
+      PoiCache.items = kept;
+      PoiCache.dirty = true;
+      PoiCache.scheduleFlush();
+    }
+  }
+
+  /** 缓存点的质心与包围盒，用于启动时的静默校验 */
+  static centroid(): CachedPoi | null {
+    if (PoiCache.items.length === 0) {
+      return null;
+    }
+    let sx = 0;
+    let sy = 0;
+    for (const it of PoiCache.items) {
+      sx += it.lng;
+      sy += it.lat;
+    }
+    const n = PoiCache.items.length;
+    return { id: -1, name: '', category: '', lng: sx / n, lat: sy / n };
+  }
+
+  /** 给定 id 集合是否覆盖当前缓存的全部点（用于判断能否跳过拉取） */
+  static has(id: number): boolean {
+    for (const it of PoiCache.items) {
+      if (it.id === id) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private static async persistFlag(key: string, value: boolean | number): Promise<void> {
     const store = PoiCache.store;
     if (store === null) {
