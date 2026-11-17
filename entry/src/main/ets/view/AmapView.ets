@@ -38,6 +38,8 @@ export struct AmapView {
   @Prop @Watch('onCenterChanged') centerLng: number = 113.2442;
   /** centerZoom 也要参与 watch，否则「点聚合点放大」只改缩放不改中心时不会触发相机移动 */
   @Prop @Watch('onCenterChanged') centerZoom: number = DEFAULT_ZOOM;
+  /** 外部点「回到我的位置」时递增，触发一次重新居中 */
+  @Prop @Watch('onRecenterTick') recenterTick: number = 0;
   /** 用户当前位置（0 表示尚未定位），用于画小圆点 */
   @Prop @Watch('onUserMoved') userLat: number = 0;
   @Prop @Watch('onUserMoved') userLng: number = 0;
@@ -146,6 +148,11 @@ export struct AmapView {
 
   onCenterChanged(): void {
     this.moveTo(this.centerLat, this.centerLng, this.centerZoom);
+  }
+
+  /** 右上角「定位」按钮触发：回到当前中心（定位点） */
+  onRecenterTick(): void {
+    this.recenter();
   }
 
   onDarkChanged(): void {
@@ -553,19 +560,6 @@ export struct AmapView {
         .backgroundColor($r('app.color.surface'))
       }
 
-      Column() {
-        Text('◎')
-          .fontSize(16)
-          .fontColor($r('app.color.primary'))
-          .width(38)
-          .height(38)
-          .textAlign(TextAlign.Center)
-          .backgroundColor($r('app.color.surface'))
-          .borderRadius(19)
-          .shadow(Theme.cardShadow())
-          .onClick(() => this.recenter())
-      }
-      .margin(Theme.S_MD)
     }
     .width('100%')
     .height('100%')

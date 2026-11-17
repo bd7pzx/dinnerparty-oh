@@ -246,20 +246,23 @@ struct Index {
         }
         .tabBar(this.tabBarItem(0, '地', '地图'))
 
-        TabContent() {
-          this.tabPage(1)
-        }
-        .tabBar(this.tabBarItem(1, '收', '收藏'))
+        // 未登录时不渲染这两页：收藏要账号身份、同好依赖口味画像
+        if (this.loggedIn) {
+          TabContent() {
+            this.tabPage(1)
+          }
+          .tabBar(this.tabBarItem(1, '收', '收藏'))
 
-        TabContent() {
-          this.tabPage(2)
+          TabContent() {
+            this.tabPage(2)
+          }
+          .tabBar(this.tabBarItem(2, '邻', '同好'))
         }
-        .tabBar(this.tabBarItem(2, '邻', '同好'))
 
         TabContent() {
           this.tabPage(3)
         }
-        .tabBar(this.profileTabBar())
+        .tabBar(this.profileTabBar(this.loggedIn ? 3 : 1))
       }
       .barPosition(BarPosition.End)
       .barMode(BarMode.Fixed)
@@ -298,8 +301,9 @@ struct Index {
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
 
-          Text(this.dark ? '☾' : '☀')
-            .fontSize(Theme.F_MD)
+          // 定位按钮（原深色切换的位置）：通知地图回到我的位置
+          Text('◎')
+            .fontSize(16)
             .fontColor($r('app.color.primary'))
             .width(34)
             .height(34)
@@ -307,8 +311,10 @@ struct Index {
             .backgroundColor($r('app.color.tint'))
             .borderRadius(17)
             .onClick(() => {
-              this.switchTheme();
+              const next = (AppStorage.get<number>('recenterTick') ?? 0) + 1;
+              AppStorage.setOrCreate<number>('recenterTick', next);
             })
+
         }
         .width('100%')
         .padding({
@@ -390,9 +396,9 @@ struct Index {
     .animation({ duration: 320, curve: curves.springMotion() })
   }
 
-  /** 第 5 个页签：未登录显示「我 / 我的」，登录后显示服务端头像 + 用户名 */
+  /** 第 4 个页签：未登录显示「我 / 我的」，登录后显示服务端头像 + 用户名 */
   @Builder
-  profileTabBar() {
+  profileTabBar(pidx: number) {
     Column() {
       if (this.loggedIn && this.userId.length > 0) {
         Image(this.avatarUrl())
@@ -405,12 +411,12 @@ struct Index {
       } else {
         Text('我')
           .fontSize(16)
-          .fontWeight(this.currentTab === 3 ? FontWeight.Bold : FontWeight.Normal)
-          .fontColor(this.currentTab === 3 ? $r('app.color.primary') : $r('app.color.ink_faint'))
+          .fontWeight(this.currentTab === pidx ? FontWeight.Bold : FontWeight.Normal)
+          .fontColor(this.currentTab === pidx ? $r('app.color.primary') : $r('app.color.ink_faint'))
       }
       Text(this.loggedIn && this.userName.length > 0 ? this.userName : '我的')
         .fontSize(Theme.F_CAP)
-        .fontColor(this.currentTab === 3 ? $r('app.color.primary') : $r('app.color.ink_faint'))
+        .fontColor(this.currentTab === pidx ? $r('app.color.primary') : $r('app.color.ink_faint'))
         .margin({ top: 3 })
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -419,9 +425,9 @@ struct Index {
     .width('100%')
     .height('100%')
     .justifyContent(FlexAlign.Center)
-    .scale({ x: this.currentTab === 3 ? 1.06 : 0.96, y: this.currentTab === 3 ? 1.06 : 0.96 })
-    .translate({ y: this.currentTab === 3 ? -2 : 0 })
-    .opacity(this.currentTab === 3 ? 1 : 0.82)
+    .scale({ x: this.currentTab === pidx ? 1.06 : 0.96, y: this.currentTab === pidx ? 1.06 : 0.96 })
+    .translate({ y: this.currentTab === pidx ? -2 : 0 })
+    .opacity(this.currentTab === pidx ? 1 : 0.82)
     .animation({ duration: 320, curve: curves.springMotion() })
   }
 }

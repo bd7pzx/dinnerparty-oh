@@ -21,6 +21,10 @@ const TITLE_BAND: number = 46;
 const WIDE_CARD_W: number = 330;
 /** 悬浮导航高度（vp），与 Index 里 barHeight 保持一致 */
 const BAR_HEIGHT_VP: number = 60;
+/** 地图浮层卡片统一高度：搜索结果卡与单个信息卡保持一致 */
+const CARD_H: number = 116;
+/** 右上角药丸行下移，避开顶部搜索/分类浮层 */
+const PILL_TOP: number = 188;
 
 interface RecentPoi {
   place: Place;
@@ -84,6 +88,8 @@ export struct MapTab {  @State places: Place[] = [];
   private loadSeq: number = 0;
   /** 是否横屏（平板 / 折叠屏展开）：横屏时搜索结果用横向连续滑动 */
   @State isWide: boolean = false;
+  /** 顶栏「定位」按钮通过 AppStorage 通知地图重新居中 */
+  @StorageProp('recenterTick') @Watch('onGlobalRecenter') recenterTick: number = 0;
   private orientCb: Callback<number> | null = null;
   /** 底部悬浮导航占用的高度：浮层卡片要据此上移，避免被遮住 */
   private barClearance: number = 0;
@@ -116,6 +122,16 @@ export struct MapTab {  @State places: Place[] = [];
       display.on('change', cb);
     } catch (err) {
       this.orientCb = null;
+    }
+  }
+
+  /** 顶栏定位按钮触发的重新居中 */
+  onGlobalRecenter(): void {
+    this.centerLat = Store.lastLat !== 0 ? Store.lastLat : this.centerLat;
+    this.centerLng = Store.lastLng !== 0 ? Store.lastLng : this.centerLng;
+    if (this.userLat !== 0) {
+      this.centerLat = this.userLat;
+      this.centerLng = this.userLng;
     }
   }
 
@@ -788,6 +804,7 @@ export struct MapTab {  @State places: Place[] = [];
       }
       .width(92)
     }
+    .height(CARD_H)
     .width('100%')
     .padding(Theme.S_MD)
     .backgroundColor($r('app.color.surface'))
@@ -882,6 +899,7 @@ export struct MapTab {  @State places: Place[] = [];
               centerLat: this.centerLat,
               centerLng: this.centerLng,
               centerZoom: this.centerZoom,
+              recenterTick: this.recenterTick,
               userLat: this.userLat,
               userLng: this.userLng,
               onPick: (p: Place) => {
@@ -959,7 +977,7 @@ export struct MapTab {  @State places: Place[] = [];
               .backgroundColor($r('app.color.surface'))
               .borderRadius(Theme.R_FULL)
           }
-          .margin(Theme.S_SM)
+          .margin({ top: PILL_TOP, right: Theme.S_SM })
 
           // ---- 地图内浮层：状态提示（左上） ----
           Column({ space: 6 }) {
@@ -1042,7 +1060,7 @@ export struct MapTab {  @State places: Place[] = [];
                   .listDirection(Axis.Horizontal)
                   .scrollBar(BarState.Off)
                   .width('100%')
-                  .height(118)
+                  .height(CARD_H)
                   .padding({ left: Theme.S_MD, right: Theme.S_MD })
                 } else {
                   Swiper(this.swiperController) {
@@ -1054,7 +1072,7 @@ export struct MapTab {  @State places: Place[] = [];
                   .indicator(false)
                   .loop(false)
                   .width('100%')
-                  .height(118)
+                  .height(CARD_H)
                   .onChange((i: number) => {
                     this.searchIndex = i;
                     if (i >= 0 && i < this.searchResults.length) {
@@ -1098,6 +1116,8 @@ export struct MapTab {  @State places: Place[] = [];
                 }
                 .width(96)
               }
+              // 单个信息卡：横屏时限制宽度，避免在宽屏上拉成一条
+              .height(CARD_H)
               // 单个信息卡：横屏时限制宽度，避免在宽屏上拉成一条
               .width(this.isWide ? 460 : '100%')
               .padding(Theme.S_MD)
