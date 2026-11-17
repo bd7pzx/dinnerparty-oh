@@ -124,9 +124,13 @@ export class PlaceService {
     return ApiClient.get<Place[]>(`/places/nearby${q}`);
   }
 
-  static async byKeyword(keyword: string): Promise<ApiResult<Place[]>> {
+    /**
+   * 关键词搜索。服务端 /api/places/search/fast 是全文匹配，地名和分类 tag 都能命中
+   * （实测「粤菜」「咖啡」「日料」都返回对应分类的店），客户端无需再补 tag 逻辑。
+   */
+  static async byKeyword(keyword: string, lat: number, lng: number): Promise<ApiResult<Place[]>> {
     const q = encodeURIComponent(keyword);
-    return ApiClient.get<Place[]>(`/api/places/search/fast?q=${q}&limit=30&lat=23.12&lng=113.25`);
+    return ApiClient.get<Place[]>(`/api/places/search/fast?q=${q}&limit=30&lat=${lat}&lng=${lng}`);
   }
 
   /**

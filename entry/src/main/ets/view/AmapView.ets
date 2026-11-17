@@ -447,18 +447,45 @@ export struct AmapView {
     }
   }
 
+  /**
+   * 兜底聚合图标：直接用 rawfile 里的水滴图（不含数字）。
+   * 冷启动时 fromView 渲染管线还没就绪，生成会失败，若不管就会退回高德默认蓝水滴。
+   */
+  private fallbackClusterIcon(): BitmapDescriptor | undefined {
+    const hit = this.iconCache.get(-3);
+    if (hit !== undefined) {
+      return hit;
+    }
+    try {
+      const ctx = getContext(this) as common.UIAbilityContext;
+      const desc = BitmapDescriptorFactory.fromRawfilePathSync(ctx, 'marker_cluster.png');
+      if (desc !== undefined && desc !== null) {
+        this.iconCache.set(-3, desc);
+        return desc;
+      }
+    } catch (err) {
+      // 仍然失败就只能用默认图标
+    }
+    return undefined;
+  }
+
   private async prepareIcon(c: ClusterPoint): Promise<BitmapDescriptor | undefined> {
     const first = c.count >= 2 ? await this.clusterIcon(c.count) : await this.placeIcon();
     if (first !== undefined) {
       return first;
     }
-    // 并发渲染时 fromView 偶发失败，稍后重试一次，避免退回高德默认蓝水滴
+    // 并发渲染时 fromView 偶发失败，稍后重试一次
     await new Promise<void>((resolve) => {
       setTimeout(() => {
         resolve();
       }, 80);
     });
-    return c.count >= 2 ? this.clusterIcon(c.count) : this.placeIcon();
+    const second = c.count >= 2 ? await this.clusterIcon(c.count) : await this.placeIcon();
+    if (second !== undefined) {
+      return second;
+    }
+    // 聚合点用无水滴图兜底，避免出现高德的默认蓝水滴
+    return c.count >= 2 ? this.fallbackClusterIcon() : second;
   }
   private warmUp(): void {
     setTimeout(() => {
@@ -475,7 +502,24 @@ export struct AmapView {
     await this.clusterIcon(n);
     if (n < 40) {
       this.warmLoop(n + 1);
+    } else {
+      // 预热结束：把启动时用兜底图标的聚合点换成带数字的
+      this.refreshClusterIcons();
     }
+  }
+
+  /** 预热完成后，给已在屏幕上的聚合点补上带数字的图标 */
+  private refreshClusterIcons(): void {
+    this.markerByKey.forEach((marker: Marker, key: string) => {
+      const c = this.idToCluster.get(marker.getId());
+      if (c === undefined || c.count < 2) {
+        return;
+      }
+      const icon = this.iconCache.get(c.count);
+      if (icon !== undefined) {
+        marker.setIcon(icon);
+      }
+    });
   }
 
   private recenter(): void {

@@ -1,6 +1,6 @@
 /** 地图页：搜索、分类筛选、自绘地图、随机推荐、地点详情 */
 import { Theme } from '../common/Theme';
-import { formatCost, formatDistance, truncate } from '../common/Util';
+import { LatLng, distanceMeters, formatCost, formatDistance, truncate } from '../common/Util';
 import { Place, Category, RandomContainer, addressOf, splitCategory } from '../model/Types';
 import { ClusterPoint, Supercluster, scaleLabel, scaleOf } from '../common/Cluster';
 import { CommunityService, DrawResult, MiscService, PlaceService } from '../service/Services';
@@ -39,6 +39,14 @@ export struct MapTab {
   /** 用户当前位置（0 表示未定位成功），地图上画小圆点 */
   @State userLat: number = 0;
   @State userLng: number = 0;
+  /** 搜索结果卡片：按距离排序，可左右滑动切换 */
+  @State searchResults: Place[] = [];
+  @State searchIndex: number = 0;
+  private swiperController: SwiperController = new SwiperController();
+  /** 该时间戳之前不因视野变化去请求接口（卡片切换时的静默移动） */
+  private silentUntil: number = 0;
+  /** 搜索输入防抖定时器 */
+  private searchTimer: number = -1;
   @State locating: boolean = false;
   /** 当前缩放与聚合结果 */
   @State zoom: number = 15;
@@ -150,15 +158,46 @@ export struct MapTab {
 
   private async search(): Promise<void> {
     this.loading = true;
-    const r = await PlaceService.byKeyword(this.keyword);
+    const r = await PlaceService.byKeyword(this.keyword, this.centerLat, this.centerLng);
     this.loading = false;
     if (r.ok && r.data !== null) {
       this.places = r.data;
       this.refreshCluster();
       this.tip = r.data.length === 0 ? `没有找到与「${this.keyword}」相关的地点` : '';
+      // 搜索结果：按离用户（未定位时用当前地图中心）的距离从近到远
+      const anchor: LatLng = this.userLat !== 0
+        ? { lng: this.userLng, lat: this.userLat }
+        : { lng: this.centerLng, lat: this.centerLat };
+      const sorted: Place[] = [];
+      for (const p of r.data) {
+        sorted.push(p);
+      }
+      sorted.sort((a: Place, b: Place) => {
+        const da = distanceMeters(anchor, { lng: a.longitude, lat: a.latitude });
+        const db = distanceMeters(anchor, { lng: b.longitude, lat: b.latitude });
+        return da - db;
+      });
+      this.searchResults = sorted;
+      this.searchIndex = 0;
+      this.swiperController = new SwiperController();
+      if (sorted.length > 0) {
+        this.moveToPlace(sorted[0]);
+      }
     } else {
       this.tip = r.error;
+      this.searchResults = [];
+      this.searchIndex = 0;
     }
+  }
+
+  /** 相机移到某个地点（不改缩放） */
+  private moveToPlace(p: Place): void {
+    this.selected = p;
+    this.selectedId = p.id;
+    this.centerLat = p.latitude;
+    this.centerLng = p.longitude;
+    // 卡片切换导致的移动不重新拉接口，只重算聚合，保证左右滑动顺畅
+    this.silentUntil = Date.now() + 1600;
   }
 
   /** 找出该地点从聚合里脱开、能单独显示的最近 zoom（supercluster 的 maxZoom+1 层必为原始点） */
@@ -257,6 +296,83 @@ export struct MapTab {
     return out;
   }
 
+  /** 与用户（未定位时用地图中心）的距离文案 */
+  private distText(p: Place): string {
+    const anchor: LatLng = this.userLat !== 0
+      ? { lng: this.userLng, lat: this.userLat }
+      : { lng: this.centerLng, lat: this.centerLat };
+    return formatDistance(distanceMeters(anchor, { lng: p.longitude, lat: p.latitude }));
+  }
+
+  /** 搜索结果卡片（Swiper 的一页），样式与地点详情卡片一致 */
+  @Builder
+  resultCard(p: Place, idx: number) {
+    Row() {
+      Column() {
+        Row() {
+          Text(`${idx + 1}/${this.searchResults.length}`)
+            .fontSize(Theme.F_CAP)
+            .fontColor($r('app.color.on_primary'))
+            .padding({ left: 6, right: 6, top: 1, bottom: 1 })
+            .backgroundColor($r('app.color.primary'))
+            .borderRadius(Theme.R_FULL)
+          Text(truncate(p.name, 12))
+            .fontSize(Theme.F_MD)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.ink'))
+            .margin({ left: 6 })
+            .layoutWeight(1)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .width('100%')
+
+        Text(`${splitCategory(p.category).join(' / ')}` +
+          (p.rating_average !== undefined && p.rating_average > 0
+            ? ` · ${p.rating_average.toFixed(1)} 分` : '') +
+          (p.per_person_cost !== undefined && p.per_person_cost !== null
+            ? ` · ${formatCost(p.per_person_cost)}` : '') +
+          ` · ${this.distText(p)}`)
+          .fontSize(Theme.F_CAP)
+          .fontColor($r('app.color.ink_faint'))
+          .margin({ top: 3 })
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+        Text(truncate(addressOf(p), 20))
+          .fontSize(Theme.F_SM)
+          .fontColor($r('app.color.ink_soft'))
+          .margin({ top: 4 })
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Column() {
+        PrimaryButton({
+          label: '看详情',
+          onTap: () => {
+            this.selected = p;
+            this.selectedId = p.id;
+            this.showDetail = true;
+          }
+        })
+      }
+      .width(92)
+    }
+    .width('100%')
+    .padding(Theme.S_MD)
+    .backgroundColor($r('app.color.surface'))
+    .borderRadius(Theme.R_LG)
+    .shadow(Theme.floatShadow())
+    .onClick(() => {
+      this.selected = p;
+      this.selectedId = p.id;
+    })
+    .margin({ left: Theme.S_MD, right: Theme.S_MD })
+  }
+
   @Builder
   clusterSheet(c: ClusterPoint) {
     Column() {
@@ -342,6 +458,21 @@ export struct MapTab {
             .backgroundColor(Color.Transparent)
             .onChange((v: string) => {
               this.keyword = v;
+              // 输入防抖自动搜索：不用按回车也能出结果
+              if (this.searchTimer >= 0) {
+                clearTimeout(this.searchTimer);
+                this.searchTimer = -1;
+              }
+              const kw = v.trim();
+              if (kw.length === 0) {
+                this.searchResults = [];
+                this.searchIndex = 0;
+                return;
+              }
+              this.searchTimer = setTimeout(() => {
+                this.searchTimer = -1;
+                this.search();
+              }, 600);
             })
             .onSubmit(() => {
               this.search();
@@ -432,6 +563,11 @@ export struct MapTab {
               onRegion: (a: number, b: number, c: number, d: number, z: number) => {
                 this.lastBounds = [a, b, c, d];
                 this.zoom = z;
+                if (Date.now() < this.silentUntil) {
+                  // 卡片切换引起的相机移动：只重算聚合，不请求接口
+                  this.refreshCluster();
+                  return;
+                }
                 this.loadRegion(a, b, c, d);
               }
             })
@@ -535,9 +671,27 @@ export struct MapTab {
               })
           }
 
-          // ---- 地图内浮层：选中地点卡片（底部） ----
+          // ---- 地图内浮层：搜索结果卡片（可左右滑动）/ 单个选中卡片 ----
           Stack({ alignContent: Alignment.Bottom }) {
-            if (this.selected !== null) {
+            if (this.searchResults.length > 0) {
+              Swiper(this.swiperController) {
+                ForEach(this.searchResults, (p: Place, idx: number) => {
+                  this.resultCard(p, idx)
+                }, (p: Place) => `sr-${p.id}`)
+              }
+              .index(this.searchIndex)
+              .indicator(false)
+              .loop(false)
+              .width('100%')
+              .height(120)
+              .margin({ bottom: Theme.S_MD })
+              .onChange((i: number) => {
+                this.searchIndex = i;
+                if (i >= 0 && i < this.searchResults.length) {
+                  this.moveToPlace(this.searchResults[i]);
+                }
+              })
+            } else if (this.selected !== null) {
               Row() {
                 Column() {
                   Text(truncate(this.selected.name, 14))
