@@ -395,35 +395,20 @@ export struct AmapView {
       }
     }
 
-    // 2. 并行准备图标：fromView 是异步渲染，串行 await 会让标记一个个「排队出现」，很慢
-    const iconCache = new Map<string, BitmapDescriptor>();
-    const jobs: Promise<void>[] = [];
-    for (const c of this.clusters) {
-      const exist = this.markerByKey.get(c.key);
-      const prevCount = this.countByKey.get(c.key);
-      const needIcon = exist === undefined || exist === null || prevCount !== c.count;
-      if (!needIcon) {
-        continue;
-      }
-      jobs.push(this.prepareIcon(c).then((ic: BitmapDescriptor | undefined) => {
-        if (ic !== undefined) {
-          iconCache.set(c.key, ic);
-        }
-      }));
-    }
-    if (jobs.length > 0) {
-      await Promise.all(jobs);
-    }
-
-    // 3. 新增 / 更新（图标已就绪，不再逐个等待）
+    // 2. 首帧不等图标：聚合点用同步加载的水滴兜底图（尺寸已裁剪），单点用缓存的矢量图标
     for (const c of this.clusters) {
       const exist = this.markerByKey.get(c.key);
       if (exist !== undefined && exist !== null) {
         const prevCount = this.countByKey.get(c.key);
         if (prevCount !== c.count) {
-          const icon = iconCache.get(c.key);
-          if (icon !== undefined) {
-            exist.setIcon(icon);
+          const cached = this.iconCache.get(c.count);
+          if (cached !== undefined) {
+            exist.setIcon(cached);
+          } else if (c.count >= 2) {
+            const fb = this.fallbackClusterIcon();
+            if (fb !== undefined) {
+              exist.setIcon(fb);
+            }
           }
           this.countByKey.set(c.key, c.count);
         }
@@ -434,7 +419,19 @@ export struct AmapView {
       const opts = new MarkerOptions();
       opts.setPosition(new LatLng(c.lat, c.lng));
       opts.setTitle(c.count >= 2 ? `${c.count} 家` : c.name);
-      const icon = iconCache.get(c.key);
+      let icon: BitmapDescriptor | undefined;
+      if (c.count >= 2) {
+        icon = this.iconCache.get(c.count);
+        if (icon === undefined) {
+          icon = this.fallbackClusterIcon();
+        }
+      } else {
+        // 单点图标只有一张，首次生成后即命中缓存
+        icon = this.iconCache.get(-1);
+        if (icon === undefined) {
+          icon = await this.placeIcon();
+        }
+      }
       if (icon !== undefined) {
         opts.setIcon(icon);
       }
@@ -445,6 +442,31 @@ export struct AmapView {
         this.idToCluster.set(marker.getId(), c);
       }
     }
+
+    // 3. 后台补齐图标（并行生成，完成后统一替换）
+    this.ensureIcons();
+  }
+
+  /** 后台并行生成缺失的图标，完成后刷新屏幕上的标记 */
+  private ensureIcons(): void {
+    const keys: string[] = [];
+    const counts: number[] = [];
+    for (const c of this.clusters) {
+      if (c.count < 2) {
+        continue;
+      }
+      if (this.iconCache.get(c.count) === undefined) {
+        keys.push(c.key);
+        counts.push(c.count);
+      }
+    }
+    if (counts.length === 0) {
+      return;
+    }
+    Promise.all(counts.map((n: number) => this.clusterIcon(n)))
+      .then(() => {
+        this.refreshClusterIcons();
+      });
   }
 
   /**

@@ -32,6 +32,11 @@ export class PoiCache {
   private static dirty: boolean = false;
   private static flushTimer: number = -1;
 
+  /** 是否已初始化（Index 启动时预初始化，MapTab 里就能同步读） */
+  static isReady(): boolean {
+    return PoiCache.store !== null;
+  }
+
   /** 启动时调用一次；读不到就按空缓存工作 */
   static async init(ctx: common.UIAbilityContext): Promise<void> {
     if (PoiCache.store !== null) {

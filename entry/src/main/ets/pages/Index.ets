@@ -4,6 +4,7 @@ import { curves, promptAction, window } from '@kit.ArkUI';
 import { hdsMaterial, HdsTabs, HdsTabsController, SystemMaterialParams } from '@kit.UIDesignKit';
 import { Theme } from '../common/Theme';
 import { Store } from '../common/Store';
+import { PoiCache } from '../common/PoiCache';
 import { AuthService, MiscService } from '../service/Services';
 import { MapTab } from '../view/MapTab';
 import { JourneyTab } from '../view/JourneyTab';
@@ -72,6 +73,12 @@ struct Index {
       await Store.init(ctx);
     } catch (err) {
       // 持久化不可用时仍可运行
+    }
+    // 缓存预初始化：放在这里，地图页创建时就能同步读到点位，不必等异步
+    try {
+      await PoiCache.init(ctx);
+    } catch (err) {
+      // 缓存不可用就退回线上
     }
     this.consent = Store.consent;
     this.dark = Store.dark;

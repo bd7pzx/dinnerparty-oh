@@ -1,5 +1,6 @@
 /** 地图页：搜索、分类筛选、自绘地图、随机推荐、地点详情 */
 import { Theme } from '../common/Theme';
+import { Store } from '../common/Store';
 import { LatLng, distanceMeters, formatCost, formatDistance, truncate } from '../common/Util';
 import { Place, Category, RandomContainer, addressOf, splitCategory } from '../model/Types';
 import { ClusterPoint, Supercluster, scaleLabel, scaleOf } from '../common/Cluster';
@@ -35,8 +36,8 @@ export struct MapTab {
   @State drawn: Place | null = null;
   @State excludeIds: number[] = [];
   /** 地图中心（优先取用户定位，失败回落荔湾） */
-  @State centerLat: number = 23.1189;
-  @State centerLng: number = 113.2442;
+  @State centerLat: number = Store.lastLat !== 0 ? Store.lastLat : 23.1189;
+  @State centerLng: number = Store.lastLng !== 0 ? Store.lastLng : 113.2442;
   @State centerZoom: number = 15;
   /** 用户当前位置（0 表示未定位成功），地图上画小圆点 */
   @State userLat: number = 0;
@@ -67,36 +68,51 @@ export struct MapTab {
   }
 
   /**
-   * 启动流程：先定位 → 用附近缓存铺地图 → 不发网络请求；
-   * 只有缓存为空（首次安装）时才立刻拉线上。用户移动视野后由 onRegion 触发拉取。
+   * 启动流程：缓存先渲染 → 再定位 → 视情况补充。
+   * 地图一出现就应该有点位，所以渲染不等定位结果；定位回来只是纠正中心。
    */
   private async boot(): Promise<void> {
     const ctx = getContext(this) as common.UIAbilityContext;
-    await PoiCache.init(ctx);
+    // Index 已预初始化过缓存；万一没就绪再兜一次
+    if (!PoiCache.isReady()) {
+      await PoiCache.init(ctx);
+    }
 
+    // ① 立刻用「上次地图中心」附近的缓存铺图（打开即见点）
+    let fromCache = false;
+    if (PoiCache.isEnabled() && PoiCache.count() > 0) {
+      const near = this.cacheNear(this.centerLng, this.centerLat, 0.15);
+      console.info(`[MapTab] cache total=${PoiCache.count()} near=${near.length} center=${this.centerLat},${this.centerLng}`);
+      if (near.length > 0) {
+        this.places = near;
+        this.refreshCluster();
+        fromCache = true;
+      }
+    } else {
+      console.info(`[MapTab] cache empty or disabled: enabled=${PoiCache.isEnabled()} count=${PoiCache.count()}`);
+    }
+
+    // ② 定位（不阻塞首帧渲染）
     this.locating = true;
     const fix = await getFix();
     this.locating = false;
     if (fix.ok && fix.pos !== null) {
       this.centerLat = fix.pos.lat;
       this.centerLng = fix.pos.lng;
-      // 用户位置小圆点
       this.userLat = fix.pos.lat;
       this.userLng = fix.pos.lng;
       this.tip = '';
+      // 定位点与上次中心不同时，用定位点附近的缓存补一次
+      if (!fromCache && PoiCache.isEnabled() && PoiCache.count() > 0) {
+        const near = this.cacheNear(this.centerLng, this.centerLat, 0.15);
+        if (near.length > 0) {
+          this.places = near;
+          this.refreshCluster();
+          fromCache = true;
+        }
+      }
     } else {
       this.tip = fix.message;
-    }
-
-    // 缓存优先：只取当前中心附近的点喂给聚合器（全量喂会拖垮 supercluster 的 O(n²) 扫描）
-    let fromCache = false;
-    if (PoiCache.isEnabled() && PoiCache.count() > 0) {
-      const near = this.cacheNear(this.centerLng, this.centerLat, 0.05);
-      if (near.length > 0) {
-        this.places = near;
-        this.refreshCluster();
-        fromCache = true;
-      }
     }
 
     if (!fromCache) {
@@ -668,6 +684,9 @@ export struct MapTab {
               onRegion: (a: number, b: number, c: number, d: number, z: number) => {
                 this.lastBounds = [a, b, c, d];
                 this.zoom = z;
+                // 记住视野中心，下次启动直接用缓存铺这一带
+                Store.lastLat = (b + d) / 2;
+                Store.lastLng = (a + c) / 2;
                 if (Date.now() < this.silentUntil) {
                   // 卡片切换引起的相机移动：只重算聚合，不请求接口
                   this.refreshCluster();

@@ -23,6 +23,8 @@ export class Store {
     const themeMode = Store.pref.getSync('themeMode', 'system') as string;
     const baseUrl = Store.pref.getSync('baseUrl', '') as string;
     const consent = Store.pref.getSync('consent', false) as boolean;
+    const lastLat = Store.pref.getSync('lastLat', 0) as number;
+    const lastLng = Store.pref.getSync('lastLng', 0) as number;
 
     Theme.dark = dark;
     AppStorage.setOrCreate<string>('token', token);
@@ -32,6 +34,8 @@ export class Store {
     AppStorage.setOrCreate<string>('themeMode', themeMode);
     AppStorage.setOrCreate<string>('baseUrl', baseUrl.length > 0 ? baseUrl : DEFAULT_BASE);
     AppStorage.setOrCreate<boolean>('consent', consent);
+    AppStorage.setOrCreate<number>('lastLat', lastLat);
+    AppStorage.setOrCreate<number>('lastLng', lastLng);
     AppStorage.setOrCreate<number>('tabIndex', 0);
   }
 
@@ -111,10 +115,29 @@ export class Store {
     Store.nickname = '';
   }
 
-  private static put(key: string, value: string | boolean): void {
+  private static put(key: string, value: string | boolean | number): void {
     if (Store.pref === null) return;
     Store.pref.putSync(key, value);
     Store.pref.flush();
+  }
+
+  /** 上次地图中心，用于启动时先用缓存渲染（不必等定位） */
+  static get lastLat(): number {
+    return AppStorage.get<number>('lastLat') ?? 0;
+  }
+
+  static set lastLat(v: number) {
+    AppStorage.setOrCreate<number>('lastLat', v);
+    Store.put('lastLat', v);
+  }
+
+  static get lastLng(): number {
+    return AppStorage.get<number>('lastLng') ?? 0;
+  }
+
+  static set lastLng(v: number) {
+    AppStorage.setOrCreate<number>('lastLng', v);
+    Store.put('lastLng', v);
   }
 }
 
