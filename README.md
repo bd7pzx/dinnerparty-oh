@@ -1,6 +1,7 @@
 # 东方饭联地图 HarmonyOS版
 
 目前是个人项目，AI slop，可用性不保证，暂时不提供Hap，请自行下载编译
+技术信息请查看AGENTS.md
 
 ## TODO
 更优雅的UI
