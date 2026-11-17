@@ -403,6 +403,26 @@ fy = 44                      // 最小点击区
 > 1. 图标图集——预生成 count 1–99 的 PNG，替代 `fromView`（单张 50–100 ms）；
 > 2. Marker 池——预建 200 个循环复用，去掉 `addMarker/remove` 的原生开销。
 
+### 6.16 标记图标：drawing 直绘 + Marker 池
+
+**图标不再走 `fromView`**。`BitmapDescriptorFactory.fromView` 要跑一遍完整 ArkUI 渲染管线再截帧，
+单张 50–100 ms，缩放换级时集中触发，表现为「标记一个个排队冒出来」。
+
+改用 `common/MarkerIcon.ets`：
+
+- 启动时把 `marker_cluster.png`（水滴）和 `marker_place.png`（地点）各解码**一次**成 PixelMap；
+- 每张图标用 `drawing.Canvas` 在空白 PixelMap 上贴底图 + `drawTextBlob` 写数字，约 1–2 ms，**同步完成**；
+- 通过 `BitmapDescriptorFactory.fromPixelMapSync()` 转成标记图标；
+- 数字颜色 `#2B2440`、位置仍是圆心 50% / 36%，视觉与原来一致。
+
+> **坑：底色变不透明**。`image.createPixelMapSync({size, ...})` 不带初始数据时，底子是不透明黑，
+> 底图的 alpha 混合上去就成了实底方块。必须传一个全 0 的 `ArrayBuffer`（RGBA 0,0,0,0）建画布，
+> 见 `MarkerIcon.blank()`。文字颜色也要用 `canvas.attachBrush(brush)` 控制——`drawing.Font` 没有 `setColor`。
+
+**Marker 池化**：不再 `addMarker/remove`，一次性建好（上限 `POOL_MAX = 320`）后只改
+`setPosition / setTitle / setIcon / setVisible`。标记 id 保持稳定，`idToCluster` 映射照旧有效；
+`hiddenSlots` 记录被隐藏的槽位，避免重复调 `setVisible(false)`。
+
 **视野缓冲放宽到 2×**：`refreshCluster()` 按 `lastBounds` 扩 2 倍缓冲裁剪再入聚合器，
 保证大尺度下屏幕外相邻区域的点也在，不会出现点位缺失。
 
